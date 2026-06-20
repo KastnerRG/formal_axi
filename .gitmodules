@@ -1,9 +1,6 @@
-[submodule "ip/zipcpu_ip/wb2axip"]
-	path = ip/zipcpu_ip/wb2axip
-	url = https://github.com/KastnerRG/wb2axip.git
-[submodule "ip/pulp_ip/pulp_platform/axi"]
-	path = ip/pulp_ip/pulp_platform/axi
-	url = git@github.com:KastnerRG/pulp_axi.git
 [submodule "axi_sva/yosys"]
 	path = axi_sva/yosys
 	url = git@github.com:KastnerRG/yosys-SVA-AXI4_FVIP.git
+[submodule "soc-testbed"]
+	path = soc-testbed
+	url = git@github.com:KastnerRG/soc-testbed.git
