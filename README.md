@@ -7,8 +7,13 @@ ZIPCPU's full AXI crossbar is the default:
 
 ```sh
 make init
+nix-shell
 make qverify
 ```
+
+The root `shell.nix` supplies Questa's host-side `libXau` and `csh` runtime
+dependencies. The Siemens tools and license configuration continue to come
+from the user's shell setup.
 
 Select another implementation with the same three-part naming used by
 soc-testbed:
