@@ -44,33 +44,76 @@ module `MODNAME_AR #(
   wire stall = ar_valid && !ar_ready;
   wire hsk = ar_valid && ar_ready;
 
+  // AR channel formal properties.
+  //
+  // This file applies reusable AXI rules from pkg_axi_fvip.sv to the
+  // Read Address channel. In AXI, AR* payload signals are driven by the
+  // master, while ARREADY is driven by the slave.
+  //
+  // Rule IDs below refer to the AXI Rules spreadsheet. Spec section references
+  // must be manually confirmed against the official AXI specification before
+  // finalizing.
+
   //___________ READY ___________
+
+  // Formal progress bound:
+  // once ARVALID is seen, ARREADY must arrive within AXI_MAX_STALL cycles.
+  // This keeps formal proofs from exploring infinite stalls.
+
+  // Formal progress/fairness bound, not a pure AXI protocol rule:
+  // once ARVALID is seen, ARREADY must arrive within AXI_MAX_STALL cycles.
+  // This keeps formal proofs from exploring infinite stalls.
 
   a_max_ready_after_valid:
     `ASSERT property (max_ready_after_valid(ar_valid, ar_ready, `AXI_MAX_STALL));
 
   //___________ VALID ___________
 
+  // R003 - Reset behavior:
+  // ARVALID must be LOW during reset and immediately after reset release.
+  // TODO: confirm exact AXI spec section.
+
   a_valid_low_after:
     `ASSUME property (low_after(rstn, ar_valid));
   a_valid_not_with_rise:
     `ASSUME property (not_with_rise(rstn, ar_valid));
+
+  // R005 - Known control signals:
+  // ARVALID and ARREADY must not be X/Z.
+  // TODO: confirm exact AXI spec section.
 
   a_valid_not_unknown:
     `ASSUME property (not_unknown(ar_valid));
   a_ready_not_unknown:
     `ASSERT property (not_unknown(ar_ready));
 
+  // R001 - VALID stability:
+  // Once ARVALID is asserted, it must remain asserted until the AR handshake.
+  // Handshake occurs when ARVALID && ARREADY.
+  // TODO: confirm exact AXI spec section.
+
   a_valid_stall:
     `ASSUME property (stable_next_when(stall, ar_valid));
+
+  // Cover for non-vacuity/debug:
+  // ensures formal can reach a case where ARVALID is HIGH before ARREADY.
 
   c_valid_before_ready:
     cover property (valid_before_ready(ar_valid, ar_ready));
 
   //___________ ID ___________
 
+  // R004 - Payload stability:
+  // AR* payload must remain stable while ARVALID is HIGH and ARREADY is LOW.
+  // TODO: confirm exact AXI spec section.
+
   a_id_stall_stable:
     `ASSUME property (stable_next_when(stall, ar_id));
+
+  // R006 - Known payload:
+  // AR* payload must not be X/Z when ARVALID is HIGH.
+  // TODO: confirm exact AXI spec section.
+
   a_id_not_unknown_when_valid:
     `ASSUME property (not_unknown_when(ar_valid, ar_id));
 
@@ -101,16 +144,49 @@ module `MODNAME_AR #(
     `ASSUME property (stable_next_when(stall, ar_burst));
   a_burst_not_unknown_when_valid:
     `ASSUME property (not_unknown_when(ar_valid, ar_burst));
+
+  // R011 - Burst size:
+  // ARSIZE must not request more bytes per transfer than the data bus supports.
+  // TODO: confirm exact AXI spec section.
+
   a_burst_size_max:
     `ASSUME property (burst_size_max(ar_valid, ar_size, DATA_W));
+
+  // R014 - Burst type encoding:
+  // ARBURST must not use reserved encoding 2'b11.
+  // TODO: confirm exact AXI spec section / table.
+
   a_burst_not_reserved:
     `ASSUME property (burst_not_reserved(ar_valid, ar_burst));
+
+  // R008 - FIXED burst length:
+  // FIXED bursts are limited to at most 16 transfers, so ARLEN <= 15.
+  // TODO: confirm exact AXI spec section.
+
   a_burst_fixed_len:
     `ASSUME property (burst_fixed_len(ar_valid, ar_burst, ar_len));
+
+  // R010 - WRAP burst length:
+  // WRAP bursts must have length 2, 4, 8, or 16 transfers.
+  // Since ARLEN encodes transfers-1, legal values are 1, 3, 7, and 15.
+  // TODO: confirm exact AXI spec section.
+
   a_burst_wrap_len:
     `ASSUME property (burst_wrap_len(ar_valid, ar_burst, ar_len));
+
+  // R012 - 4KB boundary:
+  // INCR bursts must not cross a 4KB address boundary.
+  // TODO: confirm exact AXI spec section.
+
   a_burst_no_4kb_cross:
     `ASSUME property (burst_no_4kb_cross(ar_valid, ar_burst, ar_addr, ar_len, ar_size));
+
+
+
+  // R013 - WRAP alignment:
+  // WRAP burst start address must be aligned to the transfer size.
+  // TODO: confirm exact AXI spec section.
+
   a_burst_wrap_aligned:
     `ASSUME property (burst_wrap_addr_aligned(ar_valid, ar_burst, ar_addr, ar_size));
 
@@ -120,6 +196,11 @@ module `MODNAME_AR #(
     `ASSUME property (stable_next_when(stall, ar_lock));
   a_lock_not_unknown_when_valid:
     `ASSUME property (not_unknown_when(ar_valid, ar_lock));
+  // Exclusive access constraints:
+  // Exclusive accesses have restrictions on burst length, total byte count,
+  // address alignment, maximum bytes, and cache attributes.
+  // TODO: map to spreadsheet rule IDs and confirm AXI spec section.
+
   a_excl_len:
     `ASSUME property (excl_len(ar_valid, ar_lock, ar_len));
   a_excl_bytes_pow2:
@@ -137,6 +218,11 @@ module `MODNAME_AR #(
     `ASSUME property (stable_next_when(stall, ar_cache));
   a_cache_not_unknown_when_valid:
     `ASSUME property (not_unknown_when(ar_valid, ar_cache));
+  // Cache attribute constraint:
+  // When AxCACHE indicates a non-modifiable transaction, reserved/invalid
+  // cache encodings must not be used.
+  // TODO: map to spreadsheet rule ID and confirm AXI spec section.
+
   a_cache_non_mod:
     `ASSUME property (cache_non_mod(ar_valid, ar_cache));
 
