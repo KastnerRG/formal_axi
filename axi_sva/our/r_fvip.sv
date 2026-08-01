@@ -35,6 +35,8 @@ module `MODNAME_R #(
   default disable iff (!rstn);
 
   wire stall = r_valid && !r_ready;
+
+  // R channel: read data response handshake and payload checks.
   wire hsk = r_valid && r_ready;
   wire hsk_last = hsk && r_last;
 
@@ -46,28 +48,40 @@ module `MODNAME_R #(
 
   //___________ READY ___________
 
+  // Formal bounded progress: RVALID must be accepted within AXI_MAX_STALL cycles.
+
   a_max_ready_after_valid:
     `ASSERT property (max_ready_after_valid(r_valid, r_ready, `AXI_MAX_STALL));
 
   //___________ VALID ___________
+
+  // R003 - RVALID reset behavior.
 
   a_valid_low_after:
     `ASSUME property (low_after(rstn, r_valid));
   a_valid_not_with_rise:
     `ASSUME property (not_with_rise(rstn, r_valid));
 
+  // R005 - RVALID/RREADY knownness.
+
   a_valid_not_unknown:
     `ASSUME property (not_unknown(r_valid));
   a_ready_not_unknown:
     `ASSERT property (not_unknown(r_ready));
 
+  // R001 - RVALID held stable while stalled.
+
   a_valid_stall:
     `ASSUME property (stable_next_when(stall, r_valid));
+
+  // Non-vacuity cover: RVALID high before RREADY.
 
   c_valid_before_ready:
     cover property (valid_before_ready(r_valid, r_ready));
 
   //___________ ID ___________
+
+  // RID payload checks: stable while stalled, known when RVALID.
 
   a_id_stall_stable:
     `ASSUME property (stable_next_when(stall, r_id));
@@ -76,12 +90,16 @@ module `MODNAME_R #(
 
   //___________ DATA ___________
 
+  // RDATA payload checks: stable while stalled, known when RVALID.
+
   a_data_stall_stable:
     `ASSUME property (stable_next_when(stall, r_data));
   a_data_not_unknown_when_valid:
     `ASSUME property (not_unknown_when(r_valid, r_data));
 
   //___________ RESP ___________
+
+  // RRESP payload checks: stable while stalled, known when RVALID.
 
   a_resp_stall_stable:
     `ASSUME property (stable_next_when(stall, r_resp));
@@ -90,15 +108,21 @@ module `MODNAME_R #(
 
   //___________ LAST ___________
 
+  // RLAST payload checks: stable while stalled, known when RVALID.
+
   a_last_stall_stable:
     `ASSUME property (stable_next_when(stall, r_last));
   a_last_not_unknown_when_valid:
     `ASSUME property (not_unknown_when(r_valid, r_last));
 
+  // Read packet length bound: maximum 256 R-channel data beats.
+
   a_packet_len_max:
     `ASSUME property (burst_packet_len_max(hsk_last, i_beat));
 
   //___________ USER ___________
+
+  // RUSER payload checks: stable while stalled, known when RVALID.
 
   a_user_stall_stable:
     `ASSUME property (stable_next_when(stall, r_user));
