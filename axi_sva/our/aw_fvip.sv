@@ -51,9 +51,8 @@ module `MODNAME_AW #(
   // Write Address channel. In AXI, AW* payload signals are driven by the
   // master, while AWREADY is driven by the slave.
   //
-  // Rule IDs below refer to the AXI Rules spreadsheet. Spec section references
-  // must be manually confirmed against the official AXI specification before
-  // finalizing.
+  // Rule IDs below refer to the AXI Rules spreadsheet.
+  // Spec references use AXI4 Issue D / AXI5 Issue K where confirmed.
 
   //___________ READY ___________
 
@@ -68,7 +67,7 @@ module `MODNAME_AW #(
 
   // R003 - Reset behavior:
   // AWVALID must be LOW during reset and immediately after reset release.
-  // TODO: confirm exact AXI spec section.
+  // Spec: AXI4 A3.1.2, AXI5 A3.1.2.
 
   a_valid_low_after:
     `ASSUME property (low_after(rstn, aw_valid));
@@ -77,8 +76,8 @@ module `MODNAME_AW #(
     `ASSUME property (not_with_rise(rstn, aw_valid));
 
   // R005 - Known control signals:
-  // AWVALID and AWREADY must not be X/Z.
-  // TODO: confirm exact AXI spec section.
+  // Formal sanity check: AWVALID and AWREADY must not be X/Z.
+  // Spec basis: AXI4 A3.2.1, AXI5 A3.2 handshake semantics.
 
   a_valid_not_unknown:
     `ASSUME property (not_unknown(aw_valid));
@@ -88,7 +87,7 @@ module `MODNAME_AW #(
   // R001 - VALID stability:
   // Once AWVALID is asserted, it must remain asserted until the AW handshake.
   // Handshake occurs when AWVALID && AWREADY.
-  // TODO: confirm exact AXI spec section.
+  // Spec: AXI4 A3.2.1, AXI5 A3.2.
 
   a_valid_stall:
     `ASSUME property (stable_next_when(stall, aw_valid));
@@ -103,14 +102,14 @@ module `MODNAME_AW #(
 
   // R004 - Payload stability:
   // AW* payload must remain stable while AWVALID is HIGH and AWREADY is LOW.
-  // TODO: confirm exact AXI spec section.
+  // Spec: AXI4 A3.2.1, AXI5 A3.2.
 
   a_id_stall_stable:
     `ASSUME property (stable_next_when(stall, aw_id));
 
   // R006 - Known payload:
-  // AW* payload must not be X/Z when AWVALID is HIGH.
-  // TODO: confirm exact AXI spec section.
+  // Formal sanity check: AW* payload must not be X/Z when AWVALID is HIGH.
+  // Spec basis: AXI4 A3.2.1, AXI5 A3.2 handshake semantics.
 
   a_id_not_unknown_when_valid:
     `ASSUME property (not_unknown_when(aw_valid, aw_id));
@@ -145,21 +144,21 @@ module `MODNAME_AW #(
 
   // R011 - Burst size:
   // AWSIZE must not request more bytes per transfer than the data bus supports.
-  // TODO: confirm exact AXI spec section.
+  // Spec: AXI4 A3.4.1, AXI5 A4.1.1.
 
   a_burst_size_max:
     `ASSUME property (burst_size_max(aw_valid, aw_size, DATA_W));
 
   // R014 - Burst type encoding:
   // AWBURST must not use reserved encoding 2'b11.
-  // TODO: confirm exact AXI spec section / table.
+  // Spec: AXI4 A3.4.1 Table A3-3, AXI5 A4.1.4.
 
   a_burst_not_reserved:
     `ASSUME property (burst_not_reserved(aw_valid, aw_burst));
 
   // R008 - FIXED burst length:
   // FIXED bursts are limited to at most 16 transfers, so AWLEN <= 15.
-  // TODO: confirm exact AXI spec section.
+  // Spec: AXI4 A3.4.1, AXI5 A4.1.2.
 
   a_burst_fixed_len:
     `ASSUME property (burst_fixed_len(aw_valid, aw_burst, aw_len));
@@ -167,21 +166,22 @@ module `MODNAME_AW #(
   // R010 - WRAP burst length:
   // WRAP bursts must have length 2, 4, 8, or 16 transfers.
   // Since AWLEN encodes transfers-1, legal values are 1, 3, 7, and 15.
-  // TODO: confirm exact AXI spec section.
+  // Spec: AXI4 A3.4.1, AXI5 A4.1.2.
 
   a_burst_wrap_len:
     `ASSUME property (burst_wrap_len(aw_valid, aw_burst, aw_len));
 
   // R012 - 4KB boundary:
-  // INCR bursts must not cross a 4KB address boundary.
-  // TODO: confirm exact AXI spec section.
+  // AXI bursts must not cross a 4KB address boundary.
+  // Current helper checks this only for INCR bursts.
+  // Spec: AXI4 A3.4.1, AXI5 A4.1.3.
 
   a_burst_no_4kb_cross:
     `ASSUME property (burst_no_4kb_cross(aw_valid, aw_burst, aw_addr, aw_len, aw_size));
 
   // R013 - WRAP alignment:
   // WRAP burst start address must be aligned to the transfer size.
-  // TODO: confirm exact AXI spec section.
+  // Spec: AXI4 A3.4.1, AXI5 A4.1.4.
 
   a_burst_wrap_aligned:
     `ASSUME property (burst_wrap_addr_aligned(aw_valid, aw_burst, aw_addr, aw_size));
@@ -193,10 +193,10 @@ module `MODNAME_AW #(
   a_lock_not_unknown_when_valid:
     `ASSUME property (not_unknown_when(aw_valid, aw_lock));
 
-  // Exclusive access constraints:
+  // R022-R025/R029 - Exclusive access constraints:
   // Exclusive accesses have restrictions on burst length, total byte count,
   // address alignment, maximum bytes, and cache attributes.
-  // TODO: map to spreadsheet rule IDs and confirm AXI spec section.
+  // Spec: AXI4 A7.2.4, AXI5 A7.3.3.
 
   a_excl_len:
     `ASSUME property (excl_len(aw_valid, aw_lock, aw_len));
@@ -219,7 +219,7 @@ module `MODNAME_AW #(
   // Cache attribute constraint:
   // When AxCACHE indicates a non-modifiable transaction, reserved/invalid
   // cache encodings must not be used.
-  // TODO: map to spreadsheet rule ID and confirm AXI spec section.
+  // Spec: AXI4 memory attributes, AXI5 A5.2.
 
   a_cache_non_mod:
     `ASSUME property (cache_non_mod(aw_valid, aw_cache));
