@@ -1,10 +1,24 @@
 axi_sva/arm
 
+# Formal run artifacts
 log*
-work/
+/work/
+.qverify/
+propcheck.db/
+qwave_files/
 transcript
-vsim.wlf
+*.wlf
+*.vcd
 *.jou
 *.log
+/modelsim.ini
+/vish_stacktrace.vstf
+
+# Generated reports and extracted source text
 *.csv
+!docs/axi4_our_status.csv
+!docs/axi4_recommendation_coverage.csv
+!docs/axi4_rule_coverage.csv
+!docs/axi5_issue_l_inventory.csv
+!docs/warning_classification.csv
 *.txt

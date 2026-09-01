@@ -1,0 +1,4 @@
+rule_id,our_status,rule,arm,arm_id,zipcpu,zipcpu_id,yosys,yosys_id,notes,page
+REC001,implemented,"First VALID after reset at rising ACLK after ARESETn HIGH.",1,AXI4_ERRM_*VALID_RESET,1,L298-300; L311-313,1,exit_from_reset,,A3-38
+REC002,policy-only,"xREADY/xREADY within MAXWAIT cycles of corresponding xVALID (all 5 channels).",1,AXI4_RECS_{AW|W|AR}READY_MAX_WAIT; AXI4_RECS_{B|R}READY_MAX_WAIT,0,,1,ap_{AW|W|AR|B|R}_{xREADY|xREADY}_MAXWAIT,"ARM: configurable MAXWAIT param. Yosys: cfg.MAXWAIT. ZipCPU has F_AXI_MAXWAIT (L425/L443/L463) but as SLAVE_ASSERT (constraint not rec).",A3-39
+REC003,policy-only,"Forward progress: transactions must eventually complete.",0,,0,,1,s_eventually in forward_progress_scoreboard,"Only Yosys uses liveness (s_eventually). ARM/ZipCPU: safety only.",A3-39

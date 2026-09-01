@@ -10,6 +10,7 @@ in
 pkgs.mkShell {
   packages = [
     pkgs.libxau
+    pkgs.python3
     pkgs.tcsh
     cshCompat
   ];

@@ -10,9 +10,15 @@ SHELL := /bin/bash
 #   IMPL   Wrapper implementation within that vendor and role (for example:
 #          axixbar, axi_xbar, or taxi_axi_fifo).
 #
-# The default formally verifies ZIPCPU's full-AXI crossbar.  Examples:
+# The default formally verifies ZIPCPU's full-AXI crossbar. LEVEL selects the
+# checker depth: protocol checks channel legality and role conservation; full
+# also enables cross-channel AXI transaction tracking. Examples:
 #
 #   make qverify
+#   make qverify ROLE=fifo VENDOR=zipcpu LEVEL=protocol
+#   make qverify ROLE=fifo VENDOR=zipcpu LEVEL=full
+#   make test-fifo-protocol
+#   make test-fifo-full
 #   make qverify ROLE=xbar VENDOR=pulp IMPL=axi_xbar
 #   make qverify ROLE=fifo VENDOR=taxi IMPL=taxi_axi_fifo
 #   make qverify ROLE=dma-register VENDOR=zipcpu IMPL=axidma
@@ -34,7 +40,35 @@ NEEDS_FORMAL := $(if $(filter qverify compile,$(MAKECMDGOALS)),1,$(if $(MAKECMDG
 ifeq ($(NEEDS_FORMAL),1)
 ROLE   ?= xbar
 VENDOR ?= zipcpu
-IMPL   ?= axixbar
+LEVEL  ?= full
+
+DEFAULT_IMPL := axixbar
+ifeq ($(ROLE)/$(VENDOR),fifo/zipcpu)
+DEFAULT_IMPL := sfifo
+else ifeq ($(ROLE)/$(VENDOR),fifo/pulp)
+DEFAULT_IMPL := axi_fifo
+else ifeq ($(ROLE)/$(VENDOR),fifo/taxi)
+DEFAULT_IMPL := taxi_axi_fifo
+else ifeq ($(ROLE)/$(VENDOR),xbar/pulp)
+DEFAULT_IMPL := axi_xbar
+else ifeq ($(ROLE)/$(VENDOR),dma-register/zipcpu)
+DEFAULT_IMPL := axidma
+endif
+IMPL ?= $(DEFAULT_IMPL)
+
+VALID_LEVELS := protocol full
+ifneq ($(words $(LEVEL)),1)
+$(error LEVEL must be one of: $(VALID_LEVELS))
+endif
+ifeq ($(filter $(LEVEL),$(VALID_LEVELS)),)
+$(error LEVEL must be one of: $(VALID_LEVELS))
+endif
+
+ifeq ($(LEVEL),protocol)
+override ENABLE_TRANSACTION_FVIP := 0
+else
+override ENABLE_TRANSACTION_FVIP := 1
+endif
 endif
 
 # Reuse soc-testbed's shared init and implementation-dispatch targets instead
@@ -85,28 +119,69 @@ $(error Formal testbench $(TB_SOURCE) does not exist for ROLE=$(ROLE))
 endif
 endif
 
-ODIR      ?= log
-DOFILE    ?= qverify/run_formal.do
+WORK_ROOT ?= $(abspath work)
+BUILD_ROOT ?= $(WORK_ROOT)/build
+ODIR      ?= $(BUILD_ROOT)/$(ROLE)_$(VENDOR)_$(IMPL)_$(LEVEL)
+QLIB      ?= $(abspath $(ODIR)/questa_lib)
+MODELSIM_INI ?= $(abspath $(ODIR)/modelsim.ini)
+DOFILE    ?= $(abspath qverify/run_formal.do)
 BASE_FLIST := $(abspath qverify/flist.f)
 RUN_FLIST  := $(abspath $(ODIR)/flist.f)
 COVER_VCD ?= 0
+FIFO_DEPTH ?= 2
+FIFO_FALL_THROUGH ?= 0
+FIFO_TRACK_DEPTH ?= $(FIFO_DEPTH)
+FIFO_ALLOW_BYPASS ?= $(FIFO_FALL_THROUGH)
+MAX_STALL ?= 8
+MAX_OUTSTANDING ?= 1
+MAX_AW_AHEAD ?= 4
+MAX_W_AHEAD ?= 4
+MAX_BURST_LEN ?= 8
+MAX_RESPONSE_DELAY ?= 16
+MAX_WRITE_DATA_DELAY ?= 16
+MAX_ROLE_DELAY ?= 100
+ENABLE_BOUNDED_ENV ?= 1
+FORMAL_TIMEOUT ?=
+FORMAL_JOBS ?= 32
 
-.PHONY: qverify compile clean help
+FORMAL_DEFINES := \
+	+define+AXI_FVIP_FORMAL \
+	+define+AXI_MAX_AW_AHEAD=$(MAX_AW_AHEAD) \
+	+define+AXI_MAX_W_AHEAD=$(MAX_W_AHEAD) \
+	+define+AXI_MAX_BURST_LEN=$(MAX_BURST_LEN) \
+	+define+AXI_ENABLE_TRANSACTION_FVIP=$(ENABLE_TRANSACTION_FVIP)
+
+# soc-testbed shares these arguments with its Verilator flow.  Questa accepts
+# the include paths but not Verilator's warning-policy switch.
+FORMAL_EXTRA_ARGS := $(filter-out -Wno-fatal,$(EXTRA_ARGS))
+
+.PHONY: qverify compile test-fifo-protocol test-fifo-full clean help
 
 define write_flist
 	@mkdir -p $(ODIR)
 	@{ \
 	  printf '%s\n' '+incdir+$(abspath tb)' '+incdir+$(abspath .)' \
 	    '+incdir+$(ROOT_DIR)/ip/pulp/axi/include'; \
+	  printf '%s\n' $(FORMAL_DEFINES) $(FORMAL_EXTRA_ARGS); \
 	  printf '%s\n' $(VERILOG_SOURCES); \
 	  printf '%s\n' '-f' '$(BASE_FLIST)' '$(abspath $(TB_SOURCE))'; \
 	} > $(RUN_FLIST)
 endef
 
 qverify:
-	rm -rf $(ODIR) work transcript vsim.wlf
+	rm -rf $(ODIR)
+	rm -f transcript vsim.wlf
 	$(write_flist)
-	TOP=$(TOP) FLIST=$(RUN_FLIST) qverify -c -od $(ODIR) -do $(DOFILE)
+	cd $(ODIR) && vmap -c
+	MODELSIM=$(MODELSIM_INI) TOP=$(TOP) ROLE=$(ROLE) FLIST=$(RUN_FLIST) QLIB=$(QLIB) \
+	  FIFO_DEPTH=$(FIFO_DEPTH) FIFO_FALL_THROUGH=$(FIFO_FALL_THROUGH) \
+	  FIFO_TRACK_DEPTH=$(FIFO_TRACK_DEPTH) FIFO_ALLOW_BYPASS=$(FIFO_ALLOW_BYPASS) \
+	  MAX_STALL=$(MAX_STALL) MAX_OUTSTANDING=$(MAX_OUTSTANDING) \
+	  MAX_RESPONSE_DELAY=$(MAX_RESPONSE_DELAY) \
+	  MAX_WRITE_DATA_DELAY=$(MAX_WRITE_DATA_DELAY) MAX_ROLE_DELAY=$(MAX_ROLE_DELAY) \
+	  ENABLE_BOUNDED_ENV=$(ENABLE_BOUNDED_ENV) \
+	  FORMAL_TIMEOUT=$(FORMAL_TIMEOUT) FORMAL_JOBS=$(FORMAL_JOBS) \
+	  qverify -c -od $(ODIR) -do $(DOFILE)
 	@set -e; \
 	dump_vcds() { \
 	  section="$$1"; outdir="$$2"; \
@@ -122,20 +197,30 @@ qverify:
 	    [ -f "$$db" ] || continue; \
 	    script -q /dev/null -c \
 	      "qwave2vcd -wavefile $$db -outfile $(ODIR)/$$outdir/$${prop}.vcd" \
-	      > /dev/null 2>&1; \
+	      < /dev/null > /dev/null 2>&1; \
 	  done; \
 	}; \
 	dump_vcds "Fired with Warnings" error; \
 	[ "$(COVER_VCD)" = "1" ] && dump_vcds Covered cover || true
 
 compile:
-	rm -rf $(ODIR) work transcript vsim.wlf
+	rm -rf $(ODIR)
+	rm -f transcript vsim.wlf
 	$(write_flist)
-	vlib work
-	vlog -sv -suppress 2892 -f $(RUN_FLIST)
+	cd $(ODIR) && vmap -c
+	vlib $(QLIB)
+	vmap -modelsimini $(MODELSIM_INI) work $(QLIB)
+	vlog -modelsimini $(MODELSIM_INI) -sv -suppress 2892 -f $(RUN_FLIST)
+
+test-fifo-protocol:
+	$(MAKE) qverify ROLE=fifo VENDOR=zipcpu IMPL=sfifo LEVEL=protocol
+
+test-fifo-full:
+	$(MAKE) qverify ROLE=fifo VENDOR=zipcpu IMPL=sfifo LEVEL=full
 
 help:
-	@sed -n '3,21p' Makefile
+	@sed -n '3,27p' Makefile
 
 clean:
-	rm -rf $(ODIR) work transcript vsim.wlf
+	rm -rf $(BUILD_ROOT)
+	rm -f transcript vsim.wlf

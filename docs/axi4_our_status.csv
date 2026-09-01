@@ -1,0 +1,54 @@
+rule_id,our_status,our_id,property_class,mvp_note
+R001,implemented,axi_channel_fvip.a_{aw|w|ar|b|r}_valid_stall,role-dependent interface rule,All five channels
+R002,partial,c_valid_before_ready,reachability only,Dependency cannot be established from a local safety trace
+R003,implemented,c_valid_before_ready,reachability cover,READY-after-VALID is reachable
+R004,implemented,axi_channel_fvip.a_{manager|subordinate}_valid_low_after_reset,role-dependent interface rule,Reset remains observable despite the module default disable
+R005,implemented,axi_channel_fvip.a_{manager|subordinate}_valid_low_with_reset_rise,role-dependent interface rule,All five channels
+R006,implemented,axi_channel_fvip.a_aw_payload_stall_stable,role-dependent interface rule,All enabled AW payload fields
+R007,implemented,axi_channel_fvip.a_w_payload_stall_stable,role-dependent interface rule,All W payload fields
+R008,implemented,axi_channel_fvip.a_ar_payload_stall_stable,role-dependent interface rule,All AR payload fields
+R009,implemented,axi_channel_fvip.a_b_payload_stall_stable,role-dependent interface rule,All B payload fields
+R010,implemented,axi_channel_fvip.a_r_payload_stall_stable,role-dependent interface rule,All R payload fields
+R011,implemented,axi_channel_fvip.a_{manager|subordinate}_control_known,role-dependent interface rule,VALID READY all channels
+R012,implemented,axi_channel_fvip.a_aw_payload_known,role-dependent interface rule,AW payload
+R013,implemented,axi_channel_fvip.a_w_payload_known,role-dependent interface rule,W payload
+R014,implemented,axi_channel_fvip.a_ar_payload_known,role-dependent interface rule,AR payload
+R015,implemented,axi_channel_fvip.a_b_payload_known,role-dependent interface rule,B payload
+R016,implemented,axi_channel_fvip.a_r_payload_known,role-dependent interface rule,R payload
+R017,partial,c_valid_before_ready,reachability only,Local checker covers but does not prove combinational independence
+R018,implemented,x_r_has_ar;x_b_has_completed_write,role-dependent interface rule,Bounded transaction oracle
+R019,implemented,axi_channel_fvip.a_{aw|ar}_fixed_len,role-dependent interface rule,AW and AR
+R020,implemented,8-bit AxLEN encoding,interface encoding,One to 256 beats
+R021,implemented,axi_channel_fvip.a_{aw|ar}_wrap_len,role-dependent interface rule,AW and AR
+R022,implemented,axi_channel_fvip.a_{aw|ar}_size_max,role-dependent interface rule,AW and AR
+R023,implemented,axi_channel_fvip.a_{aw|ar}_no_4kb_cross,role-dependent interface rule,AW and AR
+R024,implemented,axi_channel_fvip.a_{aw|ar}_wrap_aligned,role-dependent interface rule,AW and AR
+R025,implemented,axi_channel_fvip.a_{aw|ar}_burst_not_reserved,role-dependent interface rule,AW and AR
+R026,implemented,g_wstrb[*].x_wstrb,role-dependent interface rule,Checked after AW/W association including W-before-AW
+R027,implemented,x_w_last_exact;x_r_last_exact,role-dependent interface rule,Matched AxLEN
+R028,implemented,x_w_last_exact;x_r_last_exact,role-dependent interface rule,Matched AxLEN
+R029,implemented,oldest matching-ID queues,role-dependent interface rule,Different IDs may interleave
+R030,implemented,x_w_last_exact,role-dependent interface rule,No early or late WLAST
+R031,implemented,axi_channel_fvip.a_{aw|ar}_cache_non_mod,role-dependent interface rule,Rejects reserved nonmodifiable encodings
+R032,implemented,axi_channel_fvip.a_{aw|ar}_cache_non_mod,role-dependent interface rule,AW and AR
+R033,not applicable,axi_channel_fvip.g_no_exclusive.c_profile_{aw|ar}_lock_disabled,configuration assumption,Exclusive profile disabled
+R034,not applicable,axi_channel_fvip.g_no_exclusive.c_profile_{aw|ar}_lock_disabled,configuration assumption,Exclusive profile disabled
+R035,not applicable,axi_channel_fvip.g_no_exclusive.c_profile_{aw|ar}_lock_disabled,configuration assumption,Exclusive profile disabled
+R036,not applicable,axi_channel_fvip.g_no_exclusive.c_profile_{aw|ar}_lock_disabled,configuration assumption,Exclusive profile disabled
+R037,not applicable,axi_channel_fvip.g_no_exclusive.c_profile_{aw|ar}_lock_disabled,configuration assumption,Exclusive profile disabled
+R038,not applicable,axi_channel_fvip.g_no_exclusive.c_profile_{aw|ar}_lock_disabled,configuration assumption,Exclusive profile disabled
+R039,implemented,one-bit AxLOCK ports,interface encoding,AXI4 interface
+R040,not applicable,axi_channel_fvip.g_no_exclusive.c_profile_{aw|ar}_lock_disabled,configuration assumption,Exclusive profile disabled
+R041,implemented,axi_channel_fvip.a_{b|r}_no_exokay,configuration assumption,EXOKAY disabled with exclusives
+R042,implemented,AW/W issue queue;oldest matching-ID R queue,role-dependent interface rule,AXI4 no WID
+R043,not applicable,,feature absent,Low-power interface not exposed
+R044,not applicable,,feature absent,Low-power interface not exposed
+R045,not applicable,,feature absent,Low-power interface not exposed
+R046,not applicable,,informational,No property required
+R047,implemented,resp_e encoding,interface encoding,DECERR accepted
+R048,implemented,x_b_has_completed_write;x_r_has_ar,role-dependent interface rule,Oldest matching ID
+R049,implemented,x_ar_capacity;x_write_outstanding_bound,configuration assumption,Default bound four
+R050,not applicable,,different profile,AXI4 Full MVP
+R051,not applicable,,different profile,AXI4 Full MVP
+R052,not applicable,,different profile,AXI4 Full MVP
+R053,not applicable,,different profile,AXI4 Full MVP

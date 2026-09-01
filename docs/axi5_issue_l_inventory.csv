@@ -1,0 +1,15 @@
+feature,issue_l_status,current_interface,current_checker,profile_decision
+VALID_READY_transport,retained,all five channels,implemented,AXI4 MVP only
+credited_transport,new option,absent,missing,separate AXI5 transport profile
+resource_planes,AXI5 option,absent,missing,separate ordering-domain profile
+atomic_transactions,AXI5 option,AWATOP field only,disabled,AWATOP constrained zero
+unique_ID_indicator,AXI5 option,absent,missing,separate ordering profile
+read_data_chunking,AXI5 option,absent,missing,separate data profile
+memory_tagging,AXI5 option,absent,missing,separate sideband profile
+MPAM,Issue K option,absent,missing,separate sideband profile
+memory_encryption_context,Issue K option,absent,missing,separate sideband profile
+Arm_compression_technology,Issue L option,absent,missing,separate data profile
+new_protection_signaling,Issue L option,absent,missing,separate sideband profile
+granular_data_isolation,Issue L option,absent,missing,separate security profile
+untranslated_transactions_v4,Issue L option,absent,missing,separate address profile
+CMO_to_point_of_physical_storage,Issue L option,absent,missing,separate CMO profile

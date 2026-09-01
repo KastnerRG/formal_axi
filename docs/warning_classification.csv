@@ -1,0 +1,3 @@
+tool_id,source,classification,action
+vopt-14191,soc-testbed/axi/ip/pulp/axi/src/axi_intf.sv:29,benign generic-interface elaboration,Five zero-width typedef warnings occur only on the unparameterized interface template; instantiated AXI_BUS widths are positive
+vlog-2892,third-party parameter declarations,suppressed known compatibility warning,Explicitly suppressed in compile command and counted as suppressed errors by Questa
