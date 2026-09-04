@@ -26,14 +26,19 @@ module axi_channel_fvip #(
   parameter int DATA_W = 32,
   parameter int MAX_STALL = 8,
   parameter bit ENABLE_MAX_STALL = 1'b0,
+  parameter bit ENABLE_REQUEST_MAX_STALL = ENABLE_MAX_STALL,
+  parameter bit ENABLE_RESPONSE_MAX_STALL = ENABLE_MAX_STALL,
   parameter bit ENABLE_EXCLUSIVE = 1'b0,
   parameter bit ENABLE_ATOP = 1'b0,
   parameter int MAX_BURST_LEN = 8,
-  parameter bit MANAGER_IS_ENV = 1'b1
+  parameter bit MANAGER_IS_ENV = 1'b1,
+  localparam int W_BEAT_W = (MAX_BURST_LEN < 1) ?
+    1 : $clog2(MAX_BURST_LEN + 1)
 ) (
   input logic clk,
   input logic rstn,
-  AXI_BUS.Monitor axi
+  AXI_BUS.Monitor axi,
+  output logic [W_BEAT_W-1:0] w_beat
 );
   import pkg_axi_fvip::*;
 
@@ -41,21 +46,18 @@ module axi_channel_fvip #(
   default disable iff (!rstn);
 
   wire w_hsk = axi.w_valid && axi.w_ready;
-  wire r_hsk = axi.r_valid && axi.r_ready;
   wire w_last_hsk = w_hsk && axi.w_last;
-  wire r_last_hsk = r_hsk && axi.r_last;
 
-  logic [8:0] w_beat;
-  logic [8:0] r_beat;
+  // Keep one explicit overflow state while sizing the counter to the active
+  // burst profile.  A fixed AxLEN-sized counter makes an eight-beat proof
+  // reason about hundreds of unreachable states.
   always_ff @(posedge clk or negedge rstn) begin
     if (!rstn) begin
       w_beat <= '0;
-      r_beat <= '0;
     end else begin
       if (w_last_hsk) w_beat <= '0;
-      else if (w_hsk) w_beat <= w_beat + 9'd1;
-      if (r_last_hsk) r_beat <= '0;
-      else if (r_hsk) r_beat <= r_beat + 9'd1;
+      else if (w_hsk && w_beat < MAX_BURST_LEN)
+        w_beat <= w_beat + 1'b1;
     end
   end
 
@@ -236,23 +238,61 @@ module axi_channel_fvip #(
       axi.aw_valid |-> axi.aw_len < MAX_BURST_LEN)
     `M_RULE(c_profile_ar_burst_len,
       axi.ar_valid |-> axi.ar_len < MAX_BURST_LEN)
-    `M_RULE(c_profile_w_packet_len,
-      w_hsk |-> w_beat < MAX_BURST_LEN)
-    `S_RULE(c_profile_r_packet_len,
-      r_hsk |-> r_beat < MAX_BURST_LEN)
+    // Check the offered transfer, not only its handshake.  VALID describes a
+    // real pending beat and remains stable under backpressure, so this is the
+    // same bounded-packet policy without placing DUT-owned READY in the cone.
+    //
+    // An environment Manager is constrained deterministically on every
+    // packet.  For a DUT Manager, choose an arbitrary packet start and retain
+    // one bit until its WLAST handshake.  Because select_packet is free, a
+    // proof covers every possible packet while giving induction a local
+    // packet boundary.  This selector must never replace the universal
+    // environment assumption: choosing no packet would weaken that contract.
+    if (MANAGER_IS_ENV) begin : g_env_c_profile_w_packet_len
+      c_profile_w_packet_len: assume property (
+        axi.w_valid |-> w_beat < MAX_BURST_LEN &&
+          (axi.w_last || w_beat + 1'b1 < MAX_BURST_LEN));
+    end else begin : g_dut_c_profile_w_packet_len
+      (* anyseq *) logic select_packet;
+      logic watching_packet;
+
+      s_select_packet_start: assume property (
+        select_packet |-> axi.w_valid && w_beat == 0 && !watching_packet);
+      c_profile_w_packet_len: assert property (
+        (select_packet || watching_packet) && axi.w_valid |->
+          w_beat < MAX_BURST_LEN &&
+          (axi.w_last || w_beat + 1'b1 < MAX_BURST_LEN));
+      c_select_packet: cover property (select_packet);
+
+      always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+          watching_packet <= 1'b0;
+        end else begin
+          if (select_packet)
+            watching_packet <= !w_last_hsk;
+          else if (watching_packet && w_last_hsk)
+            watching_packet <= 1'b0;
+        end
+      end
+    end
+    // R bursts may interleave across IDs, so a single channel-wide beat
+    // counter is not meaningful.  Exact per-ID RLAST accounting belongs to
+    // the transaction tracker, alongside the corresponding ARLEN.
 
     if (!ENABLE_ATOP) begin : g_no_atop
       `M_RULE(c_profile_atop_disabled,
         axi.aw_valid |-> axi.aw_atop == '0)
     end
 
-    if (ENABLE_MAX_STALL) begin : g_ready_policy
+    if (ENABLE_REQUEST_MAX_STALL) begin : g_request_ready_policy
       `S_RULE(a_aw_max_ready_after_valid,
         axi.aw_valid |-> ##[0:MAX_STALL] axi.aw_ready)
       `S_RULE(a_w_max_ready_after_valid,
         axi.w_valid |-> ##[0:MAX_STALL] axi.w_ready)
       `S_RULE(a_ar_max_ready_after_valid,
         axi.ar_valid |-> ##[0:MAX_STALL] axi.ar_ready)
+    end
+    if (ENABLE_RESPONSE_MAX_STALL) begin : g_response_ready_policy
       `M_RULE(a_b_max_ready_after_valid,
         axi.b_valid |-> ##[0:MAX_STALL] axi.b_ready)
       `M_RULE(a_r_max_ready_after_valid,

@@ -8,8 +8,8 @@ the endpoint FVIP independently handles AXI protocol legality.
 - [`axi_fifo_fvip.sv`](axi_fifo_fvip.sv) is the public aggregate. It instantiates
   one endpoint checker on each AXI side, creates their typed views, composes
   progress bounds across both FIFO crossings, composes each output AW/W skew
-  capacity as the input bound plus FIFO depth, and instantiates the role
-  checker.
+  capacity as the input bound plus FIFO depth, and optionally instantiates the
+  role checker.
 - [`axi_fifo_role_fvip.sv`](axi_fifo_role_fvip.sv) connects one conservation
   tracker to each of AW, W, B, AR, and R. It depends only on the public views.
 - [`fifo_tracker.sv`](fifo_tracker.sv) proves no phantom output, no overflow,
@@ -39,5 +39,7 @@ make qverify ROLE=fifo VENDOR=zipcpu LEVEL=protocol
 make qverify ROLE=fifo VENDOR=zipcpu LEVEL=full
 ```
 
-Protocol level checks AXI channel legality and FIFO conservation. Full level
-also enables AXI transaction association and ordering across channels.
+Protocol level enables complete channel and transaction checking independently
+on both AXI endpoints and elaborates no FIFO role hierarchy. Full level keeps
+the endpoint checks and adds FIFO conservation, ordering, and payload
+preservation.

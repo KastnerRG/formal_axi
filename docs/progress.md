@@ -1,6 +1,44 @@
-# AXI Formal VIP: complete C0-C5 handoff
+# AXI Formal VIP: C6 2x2 crossbar handoff
 
-## Latest update: bounded endpoint and role architecture closed
+## Latest update: C6 implementation complete, proof closure open
+
+The 2x2 crossbar now follows the same aggregate structure as the FIFO: four
+standalone endpoint FVIPs prove role-independent protocol and transaction
+safety, and an optional role FVIP consumes only their public views. The role
+proof formalizes address decode, `{source, id}` prefix/removal, local DECERR,
+same-ID ordering, arbitrary request/beat tracking, W-before-AW, route
+conservation, and response return. Required contention, independent
+destination, error, backpressure, and different-ID-reordering scenarios are
+covered.
+
+The role proof now selects exactly one arbitrary DUT input port and one
+transaction occurrence. A single route tracker covers either AW or AR and
+exports the selected output handshake to the mutually exclusive read/write
+end-to-end trackers, eliminating duplicated per-source/per-destination and
+route-rank state. The role directly reuses the selected input protocol
+view's ID/beat selector, occurrence pulse, response rank/completion, and the
+universal endpoint AW/completed-W skew. This removes the duplicate role input
+R/B accounting and six role skew counters. The selected output protocol view
+now also supplies same-ID read/write occupancy after an arbitrary output watch
+ID is matched to `{source, input_watch_id}`; this removes the remaining four
+role-local output occupancy counters without adding an assumption. The input
+protocol view also supplies the selected write's W-pending/rank/completion,
+removing the role's last duplicate input W lifecycle counter and state bits.
+In the latest focused run, all 15 role assertions are nonvacuous and clean and
+all 11 role covers complete; the assertions remain inconclusive in the
+60-second budget.
+
+ZIPCPU wrapper/core issues exposed by the proof were fixed at their source,
+including address masks, output ID width, output-channel skid buffering, and
+pending local-error write IDs. Outstanding depths 1, 2, and 4 currently have
+zero fired assertions, but time-limited runs still have inconclusive proof
+targets. Request-READY and response-READY progress controls are split so the
+bounded role proof assumes only environment-owned readiness; its depth-1
+smoke also has zero fired assertions and reaches every required C6 scenario
+cover. C6's full-proof gate is therefore not yet closed. Commands, counts, and
+artifact directories are in [`c6_execution.md`](c6_execution.md).
+
+## Pre-C6 update: bounded endpoint and role architecture closed
 
 The pre-C6 architecture refactor now implements this structure:
 
@@ -52,10 +90,10 @@ For FIFO, choose an arbitrary accepted input occurrence and prove exactly one
 matching output in FIFO order with preserved metadata/payload and the correctly
 returned response. Also prove inverse conservation/no injection so a
 forward-only selected-input proof cannot miss phantom or duplicate outputs.
-For crossbar, later select an arbitrary input port, ID, destination,
-occurrence, and beat/bit; prove unique correct output routing and ID mapping,
-W ownership through WLAST, unique response return with restored ID, and no
-wrong-port copy, phantom, duplicate, or ordering violation.
+For crossbar, select an arbitrary input port, ID, destination, occurrence, and
+beat/bit; prove unique correct output routing and ID mapping, W ownership
+through WLAST, unique response return with restored ID, and no wrong-port copy,
+phantom, duplicate, or ordering violation. C6 implements this selection now.
 
 ### PULP interface and tracker reuse
 

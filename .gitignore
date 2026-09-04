@@ -1,7 +1,6 @@
 axi_sva/arm
 
 # Formal run artifacts
-log*
 /work/
 .qverify/
 propcheck.db/
@@ -12,7 +11,8 @@ transcript
 *.jou
 *.log
 /modelsim.ini
-/vish_stacktrace.vstf
+*.vstf
+/qverify_cmds.tcl
 
 # Generated reports and extracted source text
 *.csv

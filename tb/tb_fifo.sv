@@ -2,6 +2,10 @@
 
 `include "params.svh"
 
+`ifndef AXI_ENABLE_ROLE_FVIP
+`define AXI_ENABLE_ROLE_FVIP 1
+`endif
+
 module tb_fifo #(
   parameter int unsigned AXI_FIFO_DEPTH        = 2,
   parameter bit          AXI_FIFO_FALL_THROUGH = 1'b0,
@@ -12,7 +16,8 @@ module tb_fifo #(
   parameter int unsigned AXI_MAX_RESPONSE_DELAY = 16,
   parameter int unsigned AXI_MAX_WRITE_DATA_DELAY = 16,
   parameter int unsigned AXI_MAX_ROLE_DELAY = 100,
-  parameter bit          AXI_ENABLE_BOUNDED_ENV = 1'b1
+  parameter bit          AXI_ENABLE_BOUNDED_ENV = 1'b1,
+  parameter bit          AXI_ENABLE_ROLE = `AXI_ENABLE_ROLE_FVIP
 ) (
 `ifdef AXI_FVIP_FORMAL
   input logic clk,
@@ -68,6 +73,7 @@ module tb_fifo #(
     .MAX_W_AHEAD(`AXI_MAX_W_AHEAD),
     .MAX_BURST_LEN(`AXI_MAX_BURST_LEN),
     .ENABLE_TRANSACTION(`AXI_ENABLE_TRANSACTION_FVIP),
+    .ENABLE_ROLE(AXI_ENABLE_ROLE),
     .ENABLE_RESPONSE_PROGRESS(AXI_ENABLE_BOUNDED_ENV),
     .MAX_RESPONSE_DELAY(AXI_MAX_RESPONSE_DELAY),
     .ENABLE_WRITE_DATA_PROGRESS(AXI_ENABLE_BOUNDED_ENV),

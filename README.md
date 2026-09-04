@@ -25,14 +25,25 @@ make qverify ROLE=fifo VENDOR=zipcpu LEVEL=full
 `IMPL=sfifo` is selected automatically for this role/vendor pair. Equivalent
 shortcuts are `make test-fifo-protocol` and `make test-fifo-full`.
 
-- `LEVEL=protocol` checks AXI channel rules and FIFO channel conservation.
-- `LEVEL=full` additionally checks cross-channel AR/R, AW/W, and AW/B
-  transaction association, ordering, payload, and bounded progress.
+- `LEVEL=protocol` checks the complete standalone AXI endpoint contract on
+  both FIFO ports: channel rules plus AR/R, AW/W, and AW/B transaction rules.
+  It elaborates no FIFO role hierarchy.
+- `LEVEL=full` keeps those endpoint checks and adds FIFO conservation, order,
+  payload preservation, and optional bounded role progress.
 
 The default invocation remains the full ZIPCPU crossbar proof:
 
 ```sh
 make qverify
+```
+
+The crossbar uses the same split: protocol level is the complete
+role-independent endpoint proof, while full level adds cross-interface
+routing and response preservation:
+
+```sh
+make qverify ROLE=xbar VENDOR=zipcpu IMPL=axixbar LEVEL=protocol
+make qverify ROLE=xbar VENDOR=zipcpu IMPL=axixbar LEVEL=full
 ```
 
 ## Selection and output
@@ -72,6 +83,8 @@ license configuration still come from the user's shell setup.
 
 - [FVIP architecture and file map](docs/README.md)
 - [FIFO role checker](per_role_fvip/fifo/README.md)
+- [2x2 crossbar role checker](per_role_fvip/xbar/README.md)
 - [FVIP mutation validation](fvip_validation/README.md)
 - [Executed C0-C5 results](docs/c0_c5_execution.md)
+- [C6 execution record](docs/c6_execution.md)
 - [Supported AXI4 profile](docs/axi4_mvp_profile.md)

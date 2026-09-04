@@ -44,17 +44,20 @@ source order.
 ## Role and validation files
 
 Role-specific FVIP lives under [`per_role_fvip/`](../per_role_fvip/). The FIFO
-implementation and its parameters are documented in
-[`per_role_fvip/fifo/README.md`](../per_role_fvip/fifo/README.md). Exact bounded
+and 2x2 crossbar implementations and their parameters are documented in
+[`per_role_fvip/fifo/README.md`](../per_role_fvip/fifo/README.md) and
+[`per_role_fvip/xbar/README.md`](../per_role_fvip/xbar/README.md). Exact bounded
 reference queues and mutation campaigns are intentionally separate under
 [`fvip_validation/`](../fvip_validation/README.md); they validate the production
 checkers but are not part of the sign-off proof model.
 
 ## Checking levels
 
-- `LEVEL=protocol`: endpoint channel legality plus role channel conservation.
-- `LEVEL=full`: protocol level plus cross-channel transaction tracking and
-  configured bounded-progress checks.
+- `LEVEL=protocol`: the complete standalone channel and transaction endpoint
+  contract on every exposed AXI interface, with no role hierarchy.
+- `LEVEL=full`: the same endpoint contract plus the selected IP's role
+  properties. For a FIFO these prove conservation, order, and preservation;
+  for a crossbar they prove route, transformation, and response return.
 
 Formal runs use Questa's completed vacuity analysis as the assertion-trigger
 reachability audit. Covers are added for useful scenarios, or when vacuity

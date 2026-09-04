@@ -11,8 +11,10 @@ SHELL := /bin/bash
 #          axixbar, axi_xbar, or taxi_axi_fifo).
 #
 # The default formally verifies ZIPCPU's full-AXI crossbar. LEVEL selects the
-# checker depth: protocol checks channel legality and role conservation; full
-# also enables cross-channel AXI transaction tracking. Examples:
+# checker layer: protocol is the complete standalone endpoint contract
+# (channel plus transaction) with no role knowledge; full composes that
+# contract with the selected IP's cross-interface role properties.
+# Examples:
 #
 #   make qverify
 #   make qverify ROLE=fifo VENDOR=zipcpu LEVEL=protocol
@@ -64,10 +66,11 @@ ifeq ($(filter $(LEVEL),$(VALID_LEVELS)),)
 $(error LEVEL must be one of: $(VALID_LEVELS))
 endif
 
-ifeq ($(LEVEL),protocol)
-override ENABLE_TRANSACTION_FVIP := 0
-else
 override ENABLE_TRANSACTION_FVIP := 1
+ifeq ($(LEVEL),protocol)
+override ENABLE_ROLE_FVIP := 0
+else
+override ENABLE_ROLE_FVIP := 1
 endif
 endif
 
@@ -136,20 +139,80 @@ MAX_STALL ?= 8
 MAX_OUTSTANDING ?= 1
 MAX_AW_AHEAD ?= 4
 MAX_W_AHEAD ?= 4
+MAX_OUTPUT_OUTSTANDING ?= 7
+MAX_OUTPUT_AW_AHEAD ?= 7
+ifeq ($(ROLE)/$(VENDOR)/$(IMPL),xbar/zipcpu/axixbar)
+# One registered core AW plus one wrapper-skid AW can be overtaken by W.
+# A depth-one input cannot fill both positions.
+MAX_OUTPUT_W_AHEAD ?= $(shell sh -c 'n=$(MAX_OUTSTANDING); \
+	[ $$n -lt 2 ] && echo $$n || echo 2')
+else
+MAX_OUTPUT_W_AHEAD ?= 1
+endif
 MAX_BURST_LEN ?= 8
 MAX_RESPONSE_DELAY ?= 16
 MAX_WRITE_DATA_DELAY ?= 16
-MAX_ROLE_DELAY ?= 100
+ifeq ($(ROLE),xbar)
+XBAR_MAX_RESPONSE_CONTENDERS := $(shell sh -c 'a=$$((2 * $(MAX_OUTSTANDING))); \
+	b=$(MAX_OUTPUT_OUTSTANDING); [ $$a -lt $$b ] && echo $$a || echo $$b')
+XBAR_RESPONSE_QUANTUM := $(shell sh -c 'echo $$(( \
+	$(MAX_RESPONSE_DELAY) + $(MAX_STALL) + 1 ))')
+XBAR_WRITE_DATA_QUANTUM := $(shell sh -c 'echo $$(( \
+	$(MAX_WRITE_DATA_DELAY) + $(MAX_STALL) + 1 ))')
+XBAR_FORWARD_ALLOWANCE := $(shell sh -c 'echo $$(( \
+	$(XBAR_MAX_RESPONSE_CONTENDERS) * ($(MAX_STALL) + 2) ))')
+MAX_INPUT_RESPONSE_DELAY ?= $(shell sh -c 'echo $$(( \
+	2 * $(XBAR_FORWARD_ALLOWANCE) + \
+	((( $(XBAR_MAX_RESPONSE_CONTENDERS) - 1) * $(MAX_BURST_LEN)) + 1) * \
+	$(XBAR_RESPONSE_QUANTUM) ))')
+MAX_OUTPUT_WRITE_DATA_DELAY ?= $(shell sh -c 'echo $$(( \
+	$(XBAR_FORWARD_ALLOWANCE) + \
+	((( $(MAX_OUTSTANDING) - 1) * $(MAX_BURST_LEN)) + 1) * \
+	$(XBAR_WRITE_DATA_QUANTUM) ))')
+XBAR_ROLE_READ_DELAY := $(shell sh -c 'echo $$(( \
+	2 * $(XBAR_FORWARD_ALLOWANCE) + \
+	$(XBAR_MAX_RESPONSE_CONTENDERS) * $(MAX_BURST_LEN) * \
+	$(XBAR_RESPONSE_QUANTUM) ))')
+XBAR_ROLE_WRITE_DELAY := $(shell sh -c 'echo $$(( \
+	2 * $(XBAR_FORWARD_ALLOWANCE) + \
+	$(MAX_OUTSTANDING) * $(MAX_BURST_LEN) * \
+	$(XBAR_WRITE_DATA_QUANTUM) + \
+	$(XBAR_MAX_RESPONSE_CONTENDERS) * $(XBAR_RESPONSE_QUANTUM) ))')
+MAX_ROLE_DELAY ?= $(shell sh -c 'a=$(XBAR_ROLE_READ_DELAY); \
+	b=$(XBAR_ROLE_WRITE_DELAY); c=$(MAX_INPUT_RESPONSE_DELAY); \
+	d=$(MAX_OUTPUT_WRITE_DATA_DELAY); [ $$b -gt $$a ] && a=$$b; \
+	[ $$c -gt $$a ] && a=$$c; [ $$d -gt $$a ] && a=$$d; echo $$a')
+else
+MAX_INPUT_RESPONSE_DELAY ?= $(shell sh -c 'echo $$(( \
+	(2 * $(MAX_OUTSTANDING) - 1) * $(MAX_BURST_LEN) * \
+	($(MAX_RESPONSE_DELAY) + $(MAX_STALL)) + 2 * $(MAX_STALL) ))')
+MAX_OUTPUT_WRITE_DATA_DELAY ?= $(shell sh -c 'echo $$(( \
+	($(MAX_OUTSTANDING) - 1) * $(MAX_BURST_LEN) * \
+	($(MAX_WRITE_DATA_DELAY) + $(MAX_STALL)) + \
+	$(MAX_WRITE_DATA_DELAY) + 2 * $(MAX_STALL) ))')
+MAX_ROLE_DELAY ?= $(shell sh -c 'a=$(MAX_INPUT_RESPONSE_DELAY); \
+	b=$(MAX_OUTPUT_WRITE_DATA_DELAY); [ $$a -gt $$b ] && echo $$a || echo $$b')
+endif
 ENABLE_BOUNDED_ENV ?= 1
 FORMAL_TIMEOUT ?=
 FORMAL_JOBS ?= 32
+FORMAL_ENGINES ?=
+FORMAL_TARGETS ?=
+FORMAL_ASSUMES ?=
+FORMAL_ASSUME_REMOVES ?=
+FORMAL_CONSTANTS ?=
 
 FORMAL_DEFINES := \
 	+define+AXI_FVIP_FORMAL \
 	+define+AXI_MAX_AW_AHEAD=$(MAX_AW_AHEAD) \
 	+define+AXI_MAX_W_AHEAD=$(MAX_W_AHEAD) \
 	+define+AXI_MAX_BURST_LEN=$(MAX_BURST_LEN) \
-	+define+AXI_ENABLE_TRANSACTION_FVIP=$(ENABLE_TRANSACTION_FVIP)
+	+define+AXI_ENABLE_TRANSACTION_FVIP=$(ENABLE_TRANSACTION_FVIP) \
+	+define+AXI_ENABLE_ROLE_FVIP=$(ENABLE_ROLE_FVIP)
+
+ifeq ($(ROLE)/$(VENDOR)/$(IMPL),xbar/zipcpu/axixbar)
+FORMAL_DEFINES += +define+AXI_XBAR_SCALAR_ENDPOINTS +define+AXI_ZIPCPU_XBAR_SCALAR_BRIDGE
+endif
 
 # soc-testbed shares these arguments with its Verilator flow.  Questa accepts
 # the include paths but not Verilator's warning-policy switch.
@@ -177,10 +240,21 @@ qverify:
 	  FIFO_DEPTH=$(FIFO_DEPTH) FIFO_FALL_THROUGH=$(FIFO_FALL_THROUGH) \
 	  FIFO_TRACK_DEPTH=$(FIFO_TRACK_DEPTH) FIFO_ALLOW_BYPASS=$(FIFO_ALLOW_BYPASS) \
 	  MAX_STALL=$(MAX_STALL) MAX_OUTSTANDING=$(MAX_OUTSTANDING) \
+	  MAX_OUTPUT_OUTSTANDING=$(MAX_OUTPUT_OUTSTANDING) \
+	  MAX_OUTPUT_AW_AHEAD=$(MAX_OUTPUT_AW_AHEAD) \
+	  MAX_OUTPUT_W_AHEAD=$(MAX_OUTPUT_W_AHEAD) \
 	  MAX_RESPONSE_DELAY=$(MAX_RESPONSE_DELAY) \
-	  MAX_WRITE_DATA_DELAY=$(MAX_WRITE_DATA_DELAY) MAX_ROLE_DELAY=$(MAX_ROLE_DELAY) \
-	  ENABLE_BOUNDED_ENV=$(ENABLE_BOUNDED_ENV) \
+	  MAX_INPUT_RESPONSE_DELAY=$(MAX_INPUT_RESPONSE_DELAY) \
+	  MAX_WRITE_DATA_DELAY=$(MAX_WRITE_DATA_DELAY) \
+	  MAX_OUTPUT_WRITE_DATA_DELAY=$(MAX_OUTPUT_WRITE_DATA_DELAY) \
+	  MAX_ROLE_DELAY=$(MAX_ROLE_DELAY) \
+	  ENABLE_BOUNDED_ENV=$(ENABLE_BOUNDED_ENV) ENABLE_ROLE_FVIP=$(ENABLE_ROLE_FVIP) \
 	  FORMAL_TIMEOUT=$(FORMAL_TIMEOUT) FORMAL_JOBS=$(FORMAL_JOBS) \
+	  FORMAL_ENGINES='$(FORMAL_ENGINES)' \
+	  FORMAL_TARGETS='$(FORMAL_TARGETS)' \
+	  FORMAL_ASSUMES='$(FORMAL_ASSUMES)' \
+	  FORMAL_ASSUME_REMOVES='$(FORMAL_ASSUME_REMOVES)' \
+	  FORMAL_CONSTANTS='$(FORMAL_CONSTANTS)' \
 	  qverify -c -od $(ODIR) -do $(DOFILE)
 	@set -e; \
 	dump_vcds() { \

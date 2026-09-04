@@ -39,9 +39,10 @@ Planning estimate for one experienced formal engineer: 6-10 weeks through the fi
 
 **Default MVP configuration unless overridden:** AXI4 Full Issue H.c, Valid/Ready normal transactions, exclusives and ATOP disabled, `MAX_OUTSTANDING=4`, `MAX_AW_AHEAD=4`, `MAX_W_AHEAD=4`, maximum burst length `8`, `MAX_STALL=8`, `MAX_RESPONSE_DELAY=16`, and `MAX_WRITE_DATA_DELAY=16`. Report capacity and progress bounds explicitly; they define the selected bounded-AXI profile and are not architectural AXI limits.
 
-**Next action:** begin C6 using the completed standalone endpoint FVIP and its
-public transaction view. Preserve the closed pre-C6 architecture gate below;
-do not reintroduce role behavior or DUT hierarchy into the endpoint checker.
+**Next action:** close the remaining C6 protocol and full-role solver targets
+at outstanding depths 1, 2, and 4. The implementation and scenario coverage
+are complete; do not weaken the standalone endpoint/role boundary to obtain
+closure. Exact current evidence is in `docs/c6_execution.md`.
 
 ## Immediate architecture refactor before C6
 
@@ -304,11 +305,25 @@ scores, classifications, and artifact directories are in
 
 ### C6 - 2x2 crossbar
 
-- [ ] Formalize address decode, source-port prefix/removal, output ID width, default/error destination, and same-ID ordering.
-- [ ] Track an arbitrary source port, ID, destination, and request occurrence; split read, write-route, and response-return scenarios.
-- [ ] Cover simultaneous contention, independent destinations, decode errors, backpressure, and different-ID reordering.
+- [x] Formalize address decode, source-port prefix/removal, output ID width, default/error destination, and same-ID ordering.
+- [x] Track an arbitrary source port, ID, destination, and request occurrence; split read, write-route, and response-return scenarios.
+- [x] Cover simultaneous contention, independent destinations, decode errors, backpressure, and different-ID reordering.
 
 **Gate:** full proof at outstanding depths 1, 2, and 4 with no design-specific internal signal references.
+
+**Execution status (2026-09-03):** the 2x2 aggregate and role proof are
+implemented with no DUT-internal references. Protocol level contains all four
+complete endpoint transaction FVIPs and elaborates no role instance; full
+level consumes only their public views. ZIPCPU wrapper and local-error-path
+bugs found during C6 were fixed directly in the wrapper/core. Depths 1, 2,
+and 4 have zero fired assertions in the recorded runs, and the required
+scenario covers are reachable. A separate environment-owned READY policy now
+enables bounded protocol/role progress without imposing a false independent
+WREADY deadline on the DUT. The role tracks one transaction on one arbitrary
+input and reuses endpoint selector, rank, skew, and input/output occupancy
+state rather than duplicating counters. The gate remains open because
+time-limited runs retain inconclusive assertions; see `docs/c6_execution.md`
+for exact counts, commands, and classifications.
 
 ### C7 - Scaling gate
 

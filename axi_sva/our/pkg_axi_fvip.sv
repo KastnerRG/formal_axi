@@ -46,8 +46,8 @@ package pkg_axi_fvip;
   let total_bytes(len, size)   = (len + 1) << size;
   let end_byte(addr, len, size) = aligned_addr(addr, size) + total_bytes(len, size) - 1;
 
-  function automatic logic wstrb_valid(
-    // wstrb_valid — validate WSTRB for one W-beat
+  function automatic logic [127:0] wstrb_legal_lanes(
+    // wstrb_legal_lanes — legal byte-lane mask for one W beat
     //
     // Follows A3.4.1 equations (not A3.4.2 pseudocode, which has an
     // inconsistency in the unaligned INCR addr-update — breaks
@@ -61,7 +61,6 @@ package pkg_axi_fvip;
     input logic [1:0]       awburst,
     input logic [7:0]       awlen,
     input logic [7:0]       beat_idx,
-    input logic [127:0]     wstrb,
     input int               DATA_W
     );
 
@@ -110,7 +109,50 @@ package pkg_axi_fvip;
     legal_lanes = '0;
     for (int i = lower_lane; i <= upper_lane; i++)
       legal_lanes[i] = 1'b1;
+    return legal_lanes;
+
+  endfunction
+
+  function automatic logic wstrb_valid(
+    // wstrb_valid — validate the full WSTRB vector for one W beat
+    input longint unsigned  awaddr,
+    input logic [2:0]       awsize,
+    input logic [1:0]       awburst,
+    input logic [7:0]       awlen,
+    input logic [7:0]       beat_idx,
+    input logic [127:0]     wstrb,
+    input int               DATA_W
+    );
+
+    logic [127:0] legal_lanes;
+
+    legal_lanes = wstrb_legal_lanes(
+      awaddr, awsize, awburst, awlen, beat_idx, DATA_W);
     return (wstrb & ~legal_lanes) == '0;
+
+  endfunction
+
+  function automatic logic wstrb_lane_valid(
+    // wstrb_lane_valid — validate one arbitrary WSTRB byte lane
+    input longint unsigned  awaddr,
+    input logic [2:0]       awsize,
+    input logic [1:0]       awburst,
+    input logic [7:0]       awlen,
+    input logic [7:0]       beat_idx,
+    input int unsigned      lane_idx,
+    input logic             wstrb_lane,
+    input int               DATA_W
+    );
+
+    logic [127:0] legal_lanes;
+
+    legal_lanes = wstrb_legal_lanes(
+      awaddr, awsize, awburst, awlen, beat_idx, DATA_W);
+    if (!wstrb_lane)
+      return 1'b1;
+    if (lane_idx >= DATA_W / 8 || lane_idx >= 128)
+      return 1'b0;
+    return legal_lanes[lane_idx];
 
   endfunction
 

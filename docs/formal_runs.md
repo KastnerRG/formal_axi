@@ -6,8 +6,8 @@ Run the default C0/C5 FIFO configuration with:
 tools/run_formal.sh
 ```
 
-Select the checker level explicitly when comparing protocol-only and full
-transaction closure:
+Select the checker level explicitly when comparing the standalone protocol
+layer with the combined protocol-and-role layer:
 
 ```sh
 LEVEL=protocol tools/run_formal.sh
@@ -50,15 +50,42 @@ The full FIFO configuration surface is:
 - In the FIFO aggregate, DUT-owned response/write-data progress uses
   `outer delay + 2 * MAX_ROLE_DELAY`; the configured outer delay still applies
   directly to the environment-owned endpoint behavior.
-- `ENABLE_BOUNDED_ENV`: enables endpoint READY/response/write-data progress and
-  FIFO-role progress. Set it to zero for the safety-only profile.
-- `LEVEL`: `protocol` compiles out cross-channel transaction tracking; `full`
-  enables the production selected-occurrence transaction checkers. Exact
-  oracles are available only in `fvip_validation/`.
+- `ENABLE_BOUNDED_ENV`: enables endpoint READY/response/write-data progress
+  and, at `LEVEL=full`, FIFO-role progress. Set it to zero for the safety-only
+  profile.
+- `LEVEL`: `protocol` enables complete channel and selected-occurrence
+  transaction checking at each endpoint and compiles out the role hierarchy;
+  `full` keeps those checks and adds the FIFO role checker. Exact oracles are
+  available only in `fvip_validation/`.
 - `FORMAL_TIMEOUT`: optional QVerify duration such as `300`, `5m`, or `1h`;
   QVerify then terminates cleanly and writes complete inconclusive summaries.
 - `FORMAL_JOBS`: QVerify worker count, defaulting to `32`. Override it when a
   host or license requires a smaller proof-engine portfolio.
+- `FORMAL_ENGINES`: optional comma-separated QVerify engine portfolio.
+- `FORMAL_TARGETS`: optional comma-separated property patterns for a focused
+  proof group.
+- `FORMAL_ASSUMES`: optional comma-separated, already-proven assertions to
+  promote into focused-proof assumptions. Wildcard patterns also match
+  assertions.
+- `FORMAL_ASSUME_REMOVES`: optional comma-separated assumption patterns to
+  remove from a focused group. This is useful for dropping unrelated symbolic
+  selectors or exact environment queues; removal weakens the environment and
+  cannot make an invalid assertion pass.
+
+`ROLE=xbar` uses the same two-layer meaning. Its additional profile variables
+are:
+
+- `MAX_OUTPUT_OUTSTANDING`, `MAX_OUTPUT_AW_AHEAD`, and
+  `MAX_OUTPUT_W_AHEAD`: independent capacity limits for each DUT Manager
+  endpoint. They are supplied by the wrapper profile and are not inferred
+  from the number of inputs.
+- `MAX_INPUT_RESPONSE_DELAY`: optional input-endpoint response-progress bound,
+  distinct from the downstream environment's `MAX_RESPONSE_DELAY`.
+- `MAX_OUTPUT_WRITE_DATA_DELAY`: optional output-endpoint AW-to-W progress
+  bound, distinct from the input environment's `MAX_WRITE_DATA_DELAY`.
+- `LEVEL=full`: adds the cross-interface role checker to the same four complete
+  endpoint FVIPs. Focused full-level partitions may consume separately proven
+  protocol assertions through `FORMAL_ASSUMES`.
 
 The four FIFO structural settings are typed top-level parameters on the common
 `tb_fifo` harness. Depth and fall-through are passed from that harness into the
@@ -101,9 +128,9 @@ unreachable result is an explicit classification under the recorded profile.
 Unconditional assertions are active on every enabled sample and have no
 antecedent to cover. Explicit covers remain for useful scenarios such as
 backpressure, FIXED/WRAP bursts, W-before-AW, selection rank, and completion.
-Optional assertions that do not elaborate are feature-disabled: transaction
-tracking in `LEVEL=protocol`, and exclusive/ATOP semantics in the current FIFO
-profile.
+Optional assertions that do not elaborate are feature-disabled: role
+properties in `LEVEL=protocol`, and exclusive/ATOP semantics in the current
+FIFO profile.
 
 The executed C0-C5 results and their exact artifact directories are recorded in
 [`c0_c5_execution.md`](c0_c5_execution.md).  In particular, the scripts treat

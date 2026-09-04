@@ -141,19 +141,38 @@ module fv_axi_transaction_oracle #(
       if (slot < wr_count && wr_id[slot] == b_id)
         b_match = slot;
   end
-  wire b_has_write = b_match >= 0;
-  wire b_pop = b_hsk && b_has_write;
   wire [ID_W-1:0] joined_id = awq_id[0];
+  wire b_matches_queue = b_match >= 0;
+  // join_write is formed only from AW and completed-W entries that were
+  // already accepted before this sampled edge.  A response may consume that
+  // just-joined write without waiting an extra cycle for wr_id[] to update.
+  // Prefer an older queued match of the same ID so the bypass cannot violate
+  // AXI's same-ID response ordering; different IDs may still reorder.
+  wire b_matches_join = join_write && b_id == joined_id;
+  wire b_has_write = b_matches_queue || b_matches_join;
+  wire b_pop = b_hsk && b_matches_queue;
+  wire b_consumes_join =
+    b_hsk && !b_matches_queue && b_matches_join;
+  wire write_push = join_write && !b_consumes_join &&
+                    (wr_count < MAX_WRITE_OUTSTANDING || b_pop);
 
   // The production selected-occurrence helpers are intentionally not
   // instantiated here; this module is the independent exact comparison.
 
   x_write_outstanding_bound: assert property (@(posedge clk) disable iff (!rstn)
-    join_write |-> wr_count < MAX_WRITE_OUTSTANDING || b_pop);
+    join_write && !b_consumes_join |->
+      wr_count < MAX_WRITE_OUTSTANDING || b_pop);
   x_b_has_completed_write: assert property (@(posedge clk) disable iff (!rstn)
     b_valid |-> b_has_write);
 
   c_b_response: cover property (@(posedge clk) disable iff (!rstn) b_hsk);
+  c_b_join_bypass: cover property (@(posedge clk) disable iff (!rstn)
+    b_consumes_join);
+  c_b_queue_pop_push: cover property (@(posedge clk) disable iff (!rstn)
+    b_pop && write_push);
+  c_b_different_id_join_reorder: cover property (
+    @(posedge clk) disable iff (!rstn)
+    b_consumes_join && wr_count != 0);
   c_write_max_occupancy: cover property (@(posedge clk) disable iff (!rstn)
     wr_count == MAX_WRITE_OUTSTANDING);
 
@@ -239,9 +258,9 @@ module fv_axi_transaction_oracle #(
         for (entry = 0; entry < MAX_WRITE_OUTSTANDING-1; entry = entry + 1)
           if (entry >= b_match)
             wr_id[entry] <= wr_id[entry+1];
-      if (join_write)
+      if (write_push)
         wr_id[wr_count - (b_pop ? 1'b1 : 1'b0)] <= joined_id;
-      case ({join_write, b_pop})
+      case ({write_push, b_pop})
         2'b10: wr_count <= wr_count + 1'b1;
         2'b01: wr_count <= wr_count - 1'b1;
         default: wr_count <= wr_count;

@@ -24,10 +24,12 @@ module tb_link_mutation(input logic clk, input logic rstn);
   ) subordinate_axi ();
 
   axi_fvip_txn_view_if #(
-    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W)
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W),
+    .MAX_BURST_LEN(8)
   ) manager_view ();
   axi_fvip_txn_view_if #(
-    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W)
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W),
+    .MAX_BURST_LEN(8)
   ) subordinate_view ();
 
   // DUT Manager: AW payload changes while the environment holds AWREADY low.
