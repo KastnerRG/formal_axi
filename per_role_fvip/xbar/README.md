@@ -15,9 +15,10 @@ role layer then relates the four public endpoint views.
   source-prefix contract, selects one arbitrary input/source, and contains the
   contention, independent-destination, decode-error, backpressure, and
   different-ID-reordering covers.
-- [`xbar_stream_tracker.sv`](xbar_stream_tracker.sv) is instantiated once. An
-  arbitrary read/write selector makes that one instance prove ordered AW or
-  AR routing for the chosen source, destination, ID, and occurrence.
+- [`stream_trackers.sv`](../../axi_sva/our/stream_trackers.sv) defines
+  `fv_xbar_stream_tracker`, which is instantiated once. An arbitrary read/write
+  selector makes that one instance prove ordered AW or AR routing for the
+  chosen source, destination, ID, and occurrence.
 - [`xbar_read_tracker.sv`](xbar_read_tracker.sv) follows an arbitrary AR and
   selected R beat through its decoded output and back to the originating
   input, including the local DECERR path.

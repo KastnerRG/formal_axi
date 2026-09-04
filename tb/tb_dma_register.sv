@@ -33,10 +33,19 @@ module tb_dma_register;
   );
 
 `ifndef VERILATOR
-  s_sva_wrap #(
+  axi_fvip_txn_view_if #(
     .ADDR_W(`AXI_ADDR_W), .DATA_W(`AXI_DATA_W),
-    .ID_W(DmaIdW), .USER_W(`AXI_USER_W)
-  ) i_mem_fvip (.clk(clk), .rst(~rst_n), .axi(mem_port));
+    .ID_W(DmaIdW), .USER_W(`AXI_USER_W),
+    .MAX_BURST_LEN(`AXI_MAX_BURST_LEN)
+  ) mem_view ();
+  subordinate_axi_fvip #(
+    .ADDR_W(`AXI_ADDR_W), .DATA_W(`AXI_DATA_W),
+    .ID_W(DmaIdW), .USER_W(`AXI_USER_W),
+    .MAX_BURST_LEN(`AXI_MAX_BURST_LEN),
+    .ENABLE_TRANSACTION(`AXI_ENABLE_TRANSACTION_FVIP)
+  ) i_mem_fvip (
+    .clk(clk), .rstn(rst_n), .axi(mem_port), .view(mem_view)
+  );
 `endif
 
   cover property (@(posedge clk) disable iff (!rst_n)

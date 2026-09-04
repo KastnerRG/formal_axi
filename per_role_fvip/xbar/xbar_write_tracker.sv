@@ -27,15 +27,7 @@ module fv_xbar_write_tracker #(
   parameter bit PRESERVE_USER = 1'b1,
   parameter int PAYLOAD_BIT_W = 1,
   localparam int WATCH_W = (MAX_BURST_LEN < 2) ? 1 : $clog2(MAX_BURST_LEN),
-  localparam int IN_AW_W = IN_ID_W + ADDR_W + 35 + USER_W,
   localparam int IN_W_W = DATA_W + DATA_W/8 + 1 + USER_W,
-  localparam int IN_AR_W = IN_ID_W + ADDR_W + 29 + USER_W,
-  localparam int IN_B_W = IN_ID_W + 2 + USER_W,
-  localparam int IN_R_W = IN_ID_W + DATA_W + 3 + USER_W,
-  localparam int IN_REQ_W = IN_AW_W + IN_W_W + IN_AR_W + 5,
-  localparam int IN_RSP_W = IN_B_W + IN_R_W + 5,
-  localparam int OUT_REQ_W = IN_REQ_W + 2*(OUT_ID_W-IN_ID_W),
-  localparam int OUT_RSP_W = IN_RSP_W + 2*(OUT_ID_W-IN_ID_W),
   localparam int IN_PAIR_MAX =
     (MAX_AW_AHEAD > MAX_W_AHEAD) ? MAX_AW_AHEAD : MAX_W_AHEAD,
   localparam int IN_PAIR_SKEW_W = $clog2(IN_PAIR_MAX + 1) + 1,
@@ -60,58 +52,17 @@ module fv_xbar_write_tracker #(
   input logic enable,
   input logic source,
   input logic [1:0] watch_route,
-  input logic [IN_ID_W-1:0] watch_id,
-  input logic [WATCH_W-1:0] watch_beat,
   input logic [PAYLOAD_BIT_W-1:0] watch_payload_bit,
   input logic role_selected,
-  input logic s_protocol_pending,
-  input logic s_protocol_completed,
-  input logic [IN_STATE_W-1:0] s_protocol_rank,
-  input logic s_protocol_w_pending,
-  input logic [IN_STATE_W-1:0] s_protocol_w_rank,
-  input logic s_protocol_w_complete,
-  input logic s_protocol_rsp_visible,
-  input logic [OUT_STATE_W-1:0] m_protocol_outstanding,
-  input logic m_protocol_wr_select,
-  input logic m_protocol_wr_selected,
-  input logic m_protocol_wr_completed,
-  input logic m_protocol_wr_rsp_visible,
-  input logic [OUT_ID_W+2+USER_W-1:0] m_protocol_wr_b_bits,
   input logic select_now,
   input logic route_hsk,
   input logic route_offer,
   input logic route_pending,
   input logic route_completed,
-  input logic signed [IN_PAIR_SKEW_W-1:0] s_pair_skew,
-  input logic signed [OUT_PAIR_SKEW_W-1:0] m0_pair_skew,
-  input logic signed [OUT_PAIR_SKEW_W-1:0] m1_pair_skew,
-  input logic s_pair_select_aw,
-  input logic s_pair_pending_aw,
-  input logic s_pair_pending_w,
-  input logic s_pair_completed,
-  input logic [IN_STATE_W-1:0] s_pair_rank,
-  input logic [W_PAYLOAD_BIT_W-1:0] s_pair_w_payload_idx,
-  input logic s_pair_w_payload_bit,
-  input logic s_pair_w_payload_available,
-  input logic m_pair_select_aw,
-  input logic m_pair_select_w,
-  input logic m_pair_pending_aw,
-  input logic m_pair_pending_w,
-  input logic m_pair_completed,
-  input logic [OUT_STATE_W-1:0] m_pair_rank,
-  input logic [7:0] m_pair_watch_beat,
-  input logic [W_PAYLOAD_BIT_W-1:0] m_pair_w_payload_idx,
-  input logic m_pair_w_payload_bit,
-  input logic m_pair_w_payload_available,
-  input logic [W_BEAT_W-1:0] s_channel_w_beat,
-  input logic [W_BEAT_W-1:0] m0_channel_w_beat,
-  input logic [W_BEAT_W-1:0] m1_channel_w_beat,
-  input logic [IN_REQ_W-1:0] s_req_bits,
-  input logic [IN_RSP_W-1:0] s_rsp_bits,
-  input logic [OUT_REQ_W-1:0] m0_req_bits,
-  input logic [OUT_RSP_W-1:0] m0_rsp_bits,
-  input logic [OUT_REQ_W-1:0] m1_req_bits,
-  input logic [OUT_RSP_W-1:0] m1_rsp_bits
+  axi_fvip_txn_view_if.Consumer s0_view,
+  axi_fvip_txn_view_if.Consumer s1_view,
+  axi_fvip_txn_view_if.Consumer m0_view,
+  axi_fvip_txn_view_if.Consumer m1_view
 );
   default clocking cb @(posedge clk); endclocking
   default disable iff (!rstn);
@@ -132,9 +83,9 @@ module fv_xbar_write_tracker #(
   localparam int WQ_COUNT_W =
     (MAX_W_AHEAD < 2) ? 1 : $clog2(MAX_W_AHEAD + 1);
   localparam int AGE_W = (MAX_DELAY < 2) ? 1 : $clog2(MAX_DELAY + 1);
-  localparam int W_CANON_W = DATA_W + DATA_W/8 + 1 + USER_W;
-  localparam int B_CANON_W = IN_ID_W + 2 + USER_W;
-  localparam int OUT_B_W = OUT_ID_W + 2 + USER_W;
+  localparam int W_CANON_W = axi_pkg::w_width(DATA_W, USER_W);
+  localparam int B_CANON_W = axi_pkg::b_width(IN_ID_W, USER_W);
+  localparam int OUT_B_W = axi_pkg::b_width(OUT_ID_W, USER_W);
 
   typedef logic [ADDR_W-1:0] addr_t;
   typedef logic [DATA_W-1:0] data_t;
@@ -142,20 +93,127 @@ module fv_xbar_write_tracker #(
   typedef logic [USER_W-1:0] user_t;
   typedef logic [IN_ID_W-1:0] in_id_t;
   typedef logic [OUT_ID_W-1:0] out_id_t;
-  `AXI_TYPEDEF_ALL_CT(in_axi, in_req_t, in_rsp_t,
-    addr_t, in_id_t, data_t, strb_t, user_t)
-  `AXI_TYPEDEF_ALL_CT(out_axi, out_req_t, out_rsp_t,
-    addr_t, out_id_t, data_t, strb_t, user_t)
-  in_req_t s_req;
-  in_rsp_t s_rsp;
-  out_req_t m0_req, m1_req;
-  out_rsp_t m0_rsp, m1_rsp;
-  assign s_req = s_req_bits;
-  assign s_rsp = s_rsp_bits;
-  assign m0_req = m0_req_bits;
-  assign m0_rsp = m0_rsp_bits;
-  assign m1_req = m1_req_bits;
-  assign m1_rsp = m1_rsp_bits;
+  `AXI_TYPEDEF_AW_CHAN_T(in_aw_t, addr_t, in_id_t, user_t)
+  `AXI_TYPEDEF_W_CHAN_T(in_w_t, data_t, strb_t, user_t)
+  `AXI_TYPEDEF_B_CHAN_T(in_b_t, in_id_t, user_t)
+  `AXI_TYPEDEF_W_CHAN_T(out_w_t, data_t, strb_t, user_t)
+  `AXI_TYPEDEF_B_CHAN_T(out_b_t, out_id_t, user_t)
+
+  // Select only the three channels this tracker consumes. Payload and
+  // handshake signals remain separate across the public-view boundary.
+  in_aw_t s_aw;
+  in_w_t s_w;
+  in_b_t s_b;
+  out_w_t m_w [2];
+  out_b_t m_b [2];
+  assign s_aw = source ? s1_view.live_aw : s0_view.live_aw;
+  assign s_w = source ? s1_view.live_w : s0_view.live_w;
+  assign s_b = source ? s1_view.live_b : s0_view.live_b;
+  assign m_w[0] = m0_view.live_w;
+  assign m_w[1] = m1_view.live_w;
+  assign m_b[0] = m0_view.live_b;
+  assign m_b[1] = m1_view.live_b;
+
+  wire s_aw_valid = source ? s1_view.live_aw_valid : s0_view.live_aw_valid;
+  wire s_aw_ready = source ? s1_view.live_aw_ready : s0_view.live_aw_ready;
+  wire s_w_valid = source ? s1_view.live_w_valid : s0_view.live_w_valid;
+  wire s_w_ready = source ? s1_view.live_w_ready : s0_view.live_w_ready;
+  wire s_b_valid = source ? s1_view.live_b_valid : s0_view.live_b_valid;
+  wire s_b_ready = source ? s1_view.live_b_ready : s0_view.live_b_ready;
+  wire [1:0] m_aw_valid = {m1_view.live_aw_valid, m0_view.live_aw_valid};
+  wire [1:0] m_aw_ready = {m1_view.live_aw_ready, m0_view.live_aw_ready};
+  wire [1:0] m_w_valid = {m1_view.live_w_valid, m0_view.live_w_valid};
+  wire [1:0] m_w_ready = {m1_view.live_w_ready, m0_view.live_w_ready};
+  wire [1:0] m_b_valid = {m1_view.live_b_valid, m0_view.live_b_valid};
+  wire [1:0] m_b_ready = {m1_view.live_b_ready, m0_view.live_b_ready};
+
+  // Endpoint observations stay locally named so the property and state
+  // machinery below remains a literal use of the established proof model.
+  wire [IN_ID_W-1:0] watch_id =
+    source ? s1_view.wr_watch_id : s0_view.wr_watch_id;
+  wire [WATCH_W-1:0] watch_beat = source ?
+    s1_view.wr_beat_idx[WATCH_W-1:0] :
+    s0_view.wr_beat_idx[WATCH_W-1:0];
+  wire s_protocol_pending =
+    source ? s1_view.wr_pending : s0_view.wr_pending;
+  wire s_protocol_completed =
+    source ? s1_view.wr_completed : s0_view.wr_completed;
+  wire [IN_STATE_W-1:0] s_protocol_rank =
+    source ? s1_view.wr_rank : s0_view.wr_rank;
+  wire s_protocol_w_pending =
+    source ? s1_view.wr_data_pending : s0_view.wr_data_pending;
+  wire [IN_STATE_W-1:0] s_protocol_w_rank =
+    source ? s1_view.wr_data_rank : s0_view.wr_data_rank;
+  wire s_protocol_w_complete =
+    source ? s1_view.wr_data_complete : s0_view.wr_data_complete;
+  wire s_protocol_rsp_visible =
+    source ? s1_view.wr_rsp_visible : s0_view.wr_rsp_visible;
+
+  // Preserve the old route==DEST_ERROR behavior exactly: outstanding and
+  // pair observations fall back to m0, while selected write-response state
+  // is explicitly zero outside the two mapped routes.
+  wire [OUT_STATE_W-1:0] m_protocol_outstanding = watch_route == 1 ?
+    m1_view.wr_outstanding : m0_view.wr_outstanding;
+  wire m_protocol_wr_select = watch_route == 1 ? m1_view.wr_select :
+    (watch_route == 0 ? m0_view.wr_select : 1'b0);
+  wire m_protocol_wr_selected = watch_route == 1 ? m1_view.wr_selected :
+    (watch_route == 0 ? m0_view.wr_selected : 1'b0);
+  wire m_protocol_wr_completed = watch_route == 1 ? m1_view.wr_completed :
+    (watch_route == 0 ? m0_view.wr_completed : 1'b0);
+  wire m_protocol_wr_rsp_visible = watch_route == 1 ?
+    m1_view.wr_rsp_visible :
+    (watch_route == 0 ? m0_view.wr_rsp_visible : 1'b0);
+  wire [OUT_B_W-1:0] m_protocol_wr_b_bits = watch_route == 1 ?
+    {m1_view.wr_b.id, m1_view.wr_b.resp, m1_view.wr_b.user} :
+    (watch_route == 0 ?
+      {m0_view.wr_b.id, m0_view.wr_b.resp, m0_view.wr_b.user} : '0);
+
+  wire signed [IN_PAIR_SKEW_W-1:0] s_pair_skew =
+    source ? s1_view.pair_skew : s0_view.pair_skew;
+  wire signed [OUT_PAIR_SKEW_W-1:0] m0_pair_skew = m0_view.pair_skew;
+  wire signed [OUT_PAIR_SKEW_W-1:0] m1_pair_skew = m1_view.pair_skew;
+  wire s_pair_select_aw =
+    source ? s1_view.pair_select_aw : s0_view.pair_select_aw;
+  wire s_pair_pending_aw =
+    source ? s1_view.pair_pending_aw : s0_view.pair_pending_aw;
+  wire s_pair_pending_w =
+    source ? s1_view.pair_pending_w : s0_view.pair_pending_w;
+  wire s_pair_completed =
+    source ? s1_view.pair_completed : s0_view.pair_completed;
+  wire [IN_STATE_W-1:0] s_pair_rank =
+    source ? s1_view.pair_rank : s0_view.pair_rank;
+  wire [W_PAYLOAD_BIT_W-1:0] s_pair_w_payload_idx =
+    source ? s1_view.pair_w_payload_idx : s0_view.pair_w_payload_idx;
+  wire s_pair_w_payload_bit =
+    source ? s1_view.pair_w_payload_bit : s0_view.pair_w_payload_bit;
+  wire s_pair_w_payload_available = source ?
+    s1_view.pair_w_payload_available : s0_view.pair_w_payload_available;
+
+  wire m_pair_select_aw = watch_route == 1 ?
+    m1_view.pair_select_aw : m0_view.pair_select_aw;
+  wire m_pair_select_w = watch_route == 1 ?
+    m1_view.pair_select_w : m0_view.pair_select_w;
+  wire m_pair_pending_aw = watch_route == 1 ?
+    m1_view.pair_pending_aw : m0_view.pair_pending_aw;
+  wire m_pair_pending_w = watch_route == 1 ?
+    m1_view.pair_pending_w : m0_view.pair_pending_w;
+  wire m_pair_completed = watch_route == 1 ?
+    m1_view.pair_completed : m0_view.pair_completed;
+  wire [OUT_STATE_W-1:0] m_pair_rank = watch_route == 1 ?
+    m1_view.pair_rank : m0_view.pair_rank;
+  wire [7:0] m_pair_watch_beat = watch_route == 1 ?
+    m1_view.wr_beat_idx : m0_view.wr_beat_idx;
+  wire [W_PAYLOAD_BIT_W-1:0] m_pair_w_payload_idx = watch_route == 1 ?
+    m1_view.pair_w_payload_idx : m0_view.pair_w_payload_idx;
+  wire m_pair_w_payload_bit = watch_route == 1 ?
+    m1_view.pair_w_payload_bit : m0_view.pair_w_payload_bit;
+  wire m_pair_w_payload_available = watch_route == 1 ?
+    m1_view.pair_w_payload_available : m0_view.pair_w_payload_available;
+
+  wire [W_BEAT_W-1:0] s_channel_w_beat = source ?
+    s1_view.channel_w_beat : s0_view.channel_w_beat;
+  wire [W_BEAT_W-1:0] m0_channel_w_beat = m0_view.channel_w_beat;
+  wire [W_BEAT_W-1:0] m1_channel_w_beat = m1_view.channel_w_beat;
 
   function automatic logic [1:0] decode(input logic [ADDR_W-1:0] addr);
     if ((addr & ADDR_MASK) == ADDR0_BASE)
@@ -168,44 +226,44 @@ module fv_xbar_write_tracker #(
       decode = DEST_ERROR;
   endfunction
 
-  wire s_aw_hsk = enable && s_req.aw_valid && s_rsp.aw_ready;
-  wire s_w_hsk = enable && s_req.w_valid && s_rsp.w_ready;
-  wire s_w_last = s_w_hsk && s_req.w.last;
-  wire [1:0] s_route = decode(s_req.aw.addr);
+  wire s_aw_hsk = enable && s_aw_valid && s_aw_ready;
+  wire s_w_hsk = enable && s_w_valid && s_w_ready;
+  wire s_w_last = s_w_hsk && s_w.last;
+  wire [1:0] s_route = decode(s_aw.addr);
 
   wire [1:0] m_aw_hsk, m_b_offer, m_b_watch;
   wire [1:0] m_w_hsk, m_w_last;
   wire [W_CANON_W-1:0] m_w_data [2];
   wire [B_CANON_W-1:0] m_b_data [2];
-  assign m_aw_hsk[0] = enable && m0_req.aw_valid && m0_rsp.aw_ready;
-  assign m_aw_hsk[1] = enable && m1_req.aw_valid && m1_rsp.aw_ready;
-  assign m_b_offer[0] = enable && m0_rsp.b_valid &&
-    m0_rsp.b.id[OUT_ID_W-1] == source &&
-    m0_rsp.b.id[IN_ID_W-1:0] == watch_id;
-  assign m_b_offer[1] = enable && m1_rsp.b_valid &&
-    m1_rsp.b.id[OUT_ID_W-1] == source &&
-    m1_rsp.b.id[IN_ID_W-1:0] == watch_id;
-  assign m_b_watch[0] = m_b_offer[0] && m0_req.b_ready;
-  assign m_b_watch[1] = m_b_offer[1] && m1_req.b_ready;
-  assign m_w_hsk[0] = enable && m0_req.w_valid && m0_rsp.w_ready;
-  assign m_w_hsk[1] = enable && m1_req.w_valid && m1_rsp.w_ready;
-  assign m_w_last[0] = m_w_hsk[0] && m0_req.w.last;
-  assign m_w_last[1] = m_w_hsk[1] && m1_req.w.last;
+  assign m_aw_hsk[0] = enable && m_aw_valid[0] && m_aw_ready[0];
+  assign m_aw_hsk[1] = enable && m_aw_valid[1] && m_aw_ready[1];
+  assign m_b_offer[0] = enable && m_b_valid[0] &&
+    m_b[0].id[OUT_ID_W-1] == source &&
+    m_b[0].id[IN_ID_W-1:0] == watch_id;
+  assign m_b_offer[1] = enable && m_b_valid[1] &&
+    m_b[1].id[OUT_ID_W-1] == source &&
+    m_b[1].id[IN_ID_W-1:0] == watch_id;
+  assign m_b_watch[0] = m_b_offer[0] && m_b_ready[0];
+  assign m_b_watch[1] = m_b_offer[1] && m_b_ready[1];
+  assign m_w_hsk[0] = enable && m_w_valid[0] && m_w_ready[0];
+  assign m_w_hsk[1] = enable && m_w_valid[1] && m_w_ready[1];
+  assign m_w_last[0] = m_w_hsk[0] && m_w[0].last;
+  assign m_w_last[1] = m_w_hsk[1] && m_w[1].last;
   assign m_w_data[0] = {
-    m0_req.w.data, m0_req.w.strb,
-    m0_req.w.last, (PRESERVE_USER ? m0_req.w.user : '0)
+    m_w[0].data, m_w[0].strb,
+    m_w[0].last, (PRESERVE_USER ? m_w[0].user : '0)
   };
   assign m_w_data[1] = {
-    m1_req.w.data, m1_req.w.strb,
-    m1_req.w.last, (PRESERVE_USER ? m1_req.w.user : '0)
+    m_w[1].data, m_w[1].strb,
+    m_w[1].last, (PRESERVE_USER ? m_w[1].user : '0)
   };
   assign m_b_data[0] = {
-    m0_rsp.b.id[IN_ID_W-1:0], m0_rsp.b.resp,
-    (PRESERVE_USER ? m0_rsp.b.user : '0)
+    m_b[0].id[IN_ID_W-1:0], m_b[0].resp,
+    (PRESERVE_USER ? m_b[0].user : '0)
   };
   assign m_b_data[1] = {
-    m1_rsp.b.id[IN_ID_W-1:0], m1_rsp.b.resp,
-    (PRESERVE_USER ? m1_rsp.b.user : '0)
+    m_b[1].id[IN_ID_W-1:0], m_b[1].resp,
+    (PRESERVE_USER ? m_b[1].user : '0)
   };
 
   logic routed;
@@ -244,8 +302,8 @@ module fv_xbar_write_tracker #(
   assign m_w_active[1] = m_current_w_beat[1] != 0;
 
   wire [W_CANON_W-1:0] current_s_w_data = {
-    s_req.w.data, s_req.w.strb, s_req.w.last,
-    (PRESERVE_USER ? s_req.w.user : '0)
+    s_w.data, s_w.strb, s_w.last,
+    (PRESERVE_USER ? s_w.user : '0)
   };
   wire current_s_w_data_bit = watch_payload_bit < W_CANON_W ?
     current_s_w_data[watch_payload_bit] : 1'b0;
@@ -282,15 +340,15 @@ module fv_xbar_write_tracker #(
   wire mapped_route = watch_route < DEST_ERROR;
   wire signed [OUT_PAIR_SKEW_W-1:0] selected_m_pair_skew =
     watch_route == 1 ? m1_pair_skew : m0_pair_skew;
-  wire selected_m_w_valid = watch_route == 1 ? m1_req.w_valid :
-    (watch_route == 0 ? m0_req.w_valid : 1'b0);
+  wire selected_m_w_valid = watch_route == 1 ? m_w_valid[1] :
+    (watch_route == 0 ? m_w_valid[0] : 1'b0);
   wire selected_m_w_hsk_safe = watch_route == 1 ?
-    (m1_req.w_valid && m1_rsp.w_ready) :
+    (m_w_valid[1] && m_w_ready[1]) :
     (watch_route == 0 ?
-      (m0_req.w_valid && m0_rsp.w_ready) : 1'b0);
+      (m_w_valid[0] && m_w_ready[0]) : 1'b0);
   wire selected_m_w_last_hsk_safe = selected_m_w_hsk_safe &&
-    (watch_route == 1 ? m1_req.w.last :
-      (watch_route == 0 ? m0_req.w.last : 1'b0));
+    (watch_route == 1 ? m_w[1].last :
+      (watch_route == 0 ? m_w[0].last : 1'b0));
   wire [W_BEAT_W-1:0] selected_m_channel_w_beat =
     watch_route == 1 ? m1_channel_w_beat :
       (watch_route == 0 ? m0_channel_w_beat : '0);
@@ -329,7 +387,7 @@ module fv_xbar_write_tracker #(
     (routed && m_pair_pending_aw && m_pair_rank == 0) ||
     (route_offer && selected_m_pair_skew == 0);
   wire pair_shadow_s_w_offer = pair_shadow_s_live_owner &&
-    s_req.w_valid && s_current_w_beat == watch_beat;
+    s_w_valid && s_current_w_beat == watch_beat;
   wire pair_shadow_m_w_offer = pair_shadow_m_live_owner &&
     selected_m_w_valid && selected_m_channel_w_beat == watch_beat;
   wire pair_shadow_s_w_last_hsk = pair_shadow_s_live_owner &&
@@ -357,7 +415,6 @@ module fv_xbar_write_tracker #(
       m_aw_pending[0] == 0 && m_w_hsk[0]) ||
     (route1_now && m_w_ahead[1] == 0 &&
       m_aw_pending[1] == 0 && m_w_hsk[1]);
-  wire selected_m_w = selected_m_w_state || selected_m_w_bypass;
   wire selected_m_w_beat =
     (selected_m_w_state &&
       m_current_w_beat[watch_route] == watch_beat) ||
@@ -398,8 +455,8 @@ module fv_xbar_write_tracker #(
   wire selected_s_b = role_selected && s_protocol_rsp_visible;
   wire [1:0] effective_dest = watch_route;
   wire [B_CANON_W-1:0] current_s_b_data = {
-    s_rsp.b.id, s_rsp.b.resp,
-    (PRESERVE_USER ? s_rsp.b.user : '0)
+    s_b.id, s_b.resp,
+    (PRESERVE_USER ? s_b.user : '0)
   };
   wire current_m_b_data_bit = watch_payload_bit < B_CANON_W ?
     current_m_b_data[watch_payload_bit] : 1'b0;
@@ -409,9 +466,9 @@ module fv_xbar_write_tracker #(
     m_protocol_wr_b_data[watch_payload_bit] : 1'b0;
   wire s_protocol_b_head =
     s_protocol_pending && s_protocol_w_complete &&
-    s_protocol_rank == 0 && s_rsp.b_valid &&
-    s_rsp.b.id == watch_id;
-  wire s_b_stalled = s_rsp.b_valid && !s_req.b_ready;
+    s_protocol_rank == 0 && s_b_valid &&
+    s_b.id == watch_id;
+  wire s_b_stalled = s_b_valid && !s_b_ready;
   wire m_b_data_bit [2];
   assign m_b_data_bit[0] = watch_payload_bit < B_CANON_W ?
     m_b_data[0][watch_payload_bit] : 1'b0;
@@ -581,11 +638,11 @@ module fv_xbar_write_tracker #(
   // offer and may advance the protocol observer rank.  Neither branch adds
   // state or assumes response progress.
   a_endpoint_shadow_route_pending_b_hold_empty: assert property (
-    route_pending && !s_protocol_b_head && !route_hsk && !s_rsp.b_valid |=>
+    route_pending && !s_protocol_b_head && !route_hsk && !s_b_valid |=>
       !s_protocol_b_head);
   a_endpoint_shadow_route_pending_b_hold_consumed: assert property (
     route_pending && !s_protocol_b_head && !route_hsk &&
-      s_rsp.b_valid && s_req.b_ready |=>
+      s_b_valid && s_b_ready |=>
         !s_protocol_b_head);
   a_endpoint_shadow_route_pending_no_source_b: assert property (
     route_pending |-> !selected_s_b);
@@ -617,7 +674,7 @@ module fv_xbar_write_tracker #(
           current_s_b_data_bit == current_m_b_data_bit));
   a_selected_error_b: assert property (
     selected_s_b && effective_dest == DEST_ERROR |->
-      s_rsp.b.resp == axi_pkg::RESP_DECERR);
+      s_b.resp == axi_pkg::RESP_DECERR);
 
   if (ENABLE_PROGRESS) begin : g_progress
     a_selected_progress: assert property (
@@ -645,16 +702,16 @@ module fv_xbar_write_tracker #(
   c_complete: cover property (role_selected && s_protocol_completed);
   c_mapped_b_offer_stalled_live: cover property (
     selected_s_b && effective_dest != DEST_ERROR &&
-    !s_req.b_ready && selected_m_b);
+    !s_b_ready && selected_m_b);
   c_mapped_b_offer_stalled_sampled: cover property (
     selected_s_b && effective_dest != DEST_ERROR &&
-    !s_req.b_ready && m_b_sampled);
+    !s_b_ready && m_b_sampled);
   c_error_b_offer_stalled: cover property (
-    selected_s_b && effective_dest == DEST_ERROR && !s_req.b_ready);
+    selected_s_b && effective_dest == DEST_ERROR && !s_b_ready);
   c_b_shadow_output_selection: cover property (
     route_hsk && mapped_route && m_protocol_wr_select);
   c_b_shadow_mapped_live_stalled: cover property (
-    selected_s_b && mapped_route && !s_req.b_ready &&
+    selected_s_b && mapped_route && !s_b_ready &&
       routed && !m_protocol_wr_completed && m_protocol_wr_rsp_visible);
   c_b_shadow_mapped_stored: cover property (
     selected_s_b && mapped_route && routed && m_protocol_wr_completed);

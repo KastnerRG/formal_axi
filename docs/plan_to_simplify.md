@@ -1,13 +1,15 @@
 # Plan to simplify the AXI FVIP
 
-> ### ⚠ Written 2026-09-02; re-verified 2026-09-04 — read §15 first
+> ### ⚠ Written 2026-09-02; re-verified and executed 2026-09-04
 >
 > The parallel C6 closure effort has since grown the sources **3894 → 5514 lines**
 > and independently implemented several items here. **§6 is inverted** (the view is
 > now consumed by role code), **§13.1's state numbers are obsolete**, and
 > **§13.2 is refuted on soundness**. §1, §4, §5, §7 and §12 are unaffected; §3 needs
 > one adjustment (§15.4b).
-> See [§15](#15-re-verification-against-the-c6-effort-2026-09-04).
+> See [§15](#15-re-verification-against-the-c6-effort-2026-09-04) for the
+> corrected constraints and [§16](#16-executed-refactor-2026-09-04) for the
+> implementation and measured result.
 
 **Scope:** the two checking levels — protocol-endpoint only (`axi_sva/our/`) and
 protocol+role (`per_role_fvip/`). Target: same functionality, ~58% fewer lines,
@@ -61,7 +63,7 @@ in no flist, so consider relocating them under `docs/` or `third_party/` so
 
 | File | Lines | Absorbed into |
 |---|---|---|
-| `axi_switch_fvip.svh` | 24 | gone with the `MASTER`/`SLAVE` scheme (§4) |
+| `axi_switch_fvip.svh` | 24 | gone with the legacy dual-wrapper polarity scheme (§4) |
 | `s_sva_wrap.sv` | 96 | merged wrapper (§4) |
 | `fifo_tracker.sv` | 96 | `fv_smart_tracker` (§3) |
 | `xbar_stream_tracker.sv` | 101 | `fv_smart_tracker` (§3) |
@@ -188,18 +190,18 @@ magic-number widths. Passing `ax_aw_chan_t` deletes both sides of that.
 
 ---
 
-## 4. Delete the `MASTER`/`SLAVE` textual-duplication scheme
+## 4. Delete the legacy dual-wrapper textual-duplication scheme
 
 `axi_switch_fvip.svh` defines `MODNAME_*` + `TXN_SOURCE`/`TXN_DEST`, and
-`axi_fvip.sv` is `` `include ``d **twice** (once with `` `define MASTER ``) from
+`axi_fvip.sv` is `` `include ``d **twice** (once with `` `define AXI_FVIP_MANAGER ``) from
 `m_sva_wrap.sv` / `s_sva_wrap.sv`. That compiles 886 lines of tracker source as two
 textually distinct module families.
 
 `axi_channel_fvip.sv` already shows the right idiom — `parameter bit MANAGER_IS_ENV`
-plus `` `M_RULE ``/`` `S_RULE `` macros. Apply it to the trackers too:
+plus `` `MANAGER_RULE ``/`` `SUBORDINATE_RULE `` macros. Apply it to the trackers too:
 
 - delete `axi_switch_fvip.svh` (24 lines) and all `MODNAME_*` macros;
-- `` `ifdef MASTER `` in `axi_pair_tracker.sv:71-76` and `axi_fvip.sv:43-47`
+- `` `ifdef AXI_FVIP_MANAGER `` in `axi_pair_tracker.sv:71-76` and `axi_fvip.sv:43-47`
   → `if (MANAGER_IS_ENV)` generate;
 - merge `m_sva_wrap.sv` + `s_sva_wrap.sv` (96 + 96, differing only in comments and
   the `m_`/`s_` prefix) into one `axi_fvip_wrap.sv` (~70).
@@ -369,7 +371,7 @@ Two gotchas found while testing, already folded into the plan:
 1. `wire int unsigned x = f();` is rejected — *"Net data types must be 4-state."*
    Use a sized `logic` vector for decode outputs.
 2. Moving polarity into generate blocks **changes hierarchical property paths**
-   (`i_trk.g_a_a_no_overflow.a_no_overflow`). This matches what `M_RULE`/`S_RULE`
+   (`i_trk.g_a_a_no_overflow.a_no_overflow`). This matches what `MANAGER_RULE`/`SUBORDINATE_RULE`
    already does in `axi_channel_fvip.sv`, but `FORMAL_TARGETS`/`FORMAL_ASSUMES`
    patterns and `docs/c6_execution.md` reference names — keep a rename map.
 
@@ -415,7 +417,7 @@ Files deleted outright: `axi_include.svh`, `yosys_questa_formal_wrapper.sv`,
    removal — **no role checker reads any of it**, so nothing downstream changes.
    Biggest ratio of lines-removed to risk in the whole plan; do it early.
 2. **§5** `axi_pkg` reuse + trim `pkg_axi_fvip` — mechanical, T9-backed, zero risk.
-3. **§4** kill `MASTER`/`SLAVE` duplication — pure refactor, no property changes.
+3. **§4** kill the legacy dual-wrapper polarity duplication — pure refactor, no property changes.
 4. **§3** introduce the three generic trackers; port `fifo_tracker` +
    `xbar_stream_tracker` first (they are already the same module), then the
    endpoint trackers.
@@ -553,7 +555,7 @@ breakage is concrete:
 | Coupling | Where | Count |
 |---|---|---|
 | `i_txn.i_rd_tracker.*` / `i_wr_b_tracker.*` hierarchical refs | `tb_transaction_mutation.sv:249-264` | 8 |
-| `m_`/`s_axi_transaction_fvip` module names from the `MASTER`/`SLAVE` scheme | `tb_transaction_mutation.sv:230-243` | 2 |
+| legacy `m_`/`s_` transaction-module names from the dual-wrapper polarity scheme | `tb_transaction_mutation.sv:230-243` | 2 |
 | hardcoded property names in scoring greps (`x_r_has_ar`, `x_w_last_exact`, `x_wstrb`, `i_tracker.`, `g_source\|g_response`, …) | `fvip_validation/tools/*.sh` | ~15 |
 
 These 25 sites **are** the rename map referenced in §11. Update them in the same
@@ -891,7 +893,7 @@ narrower and still worth doing:
 - §6e's config struct;
 - §6d's guidance on hierarchical references, unchanged.
 
-`live_*`, the magic widths, and the `MASTER`/`SLAVE` scheme are all still present, so
+`live_*`, the magic widths, and the legacy dual-wrapper polarity scheme were all still present at this audit point, so
 §4, §5 and §6b remain valid as written.
 
 ### 15.4b §3's "the two trackers are the same module" has partly lapsed
@@ -955,3 +957,115 @@ So the refactor is not rescuing a doomed proof, and it is not needed to rescue o
 It is maintainability work on a codebase that grew 42% under closure pressure — which
 is a better argument for doing it than any of the proof-performance claims this plan
 started with.
+
+---
+
+## 16. Executed refactor: 2026-09-04
+
+This section supersedes the speculative file/line targets above.  The target of
+seven files and roughly 1640 lines was not compatible with the post-C6 proof
+architecture: reaching it would have required deleting still-open production
+obligations and their induction scaffolding, or folding the remaining logic into
+large monoliths.  The implementation instead removes duplication and mechanical
+wiring while preserving every frozen checker and the separation between protocol
+safety, role safety, and optional bounded progress.
+
+### 16.1 Measured production result
+
+The active production closure is now **17 files / 4731 physical lines**, down
+from the frozen **20 files / 5514 lines**: three fewer files (15%) and 783 fewer
+lines (14.2%).  The two dead files identified in §1 add another 222 deleted
+lines and two deleted files outside that active count.  Thus the production
+closure plus known-dead source is smaller by **1005 lines and five files**.
+
+The reduction is concentrated at the boundaries that were hardest to read:
+
+| Area | Frozen | Refactored | Change |
+|---|---:|---:|---:|
+| legacy polarity wrappers/switch | 218 lines, 3 files | 5 lines, 1 file | -213 lines, -2 files |
+| shared stream cores/policy shells | 242 lines, 2 files | 263 lines, 1 file | +21 lines, -1 file |
+| endpoint read/pair/write trackers | 883 lines, 3 files | 726 lines, 3 files | -157 lines |
+| xbar aggregate | 285 lines | 247 lines | -38 lines |
+| xbar source/role boundary | 769 lines | 380 lines | -389 lines |
+| xbar read/write internals | 1121 lines | 1179 lines | +58 lines |
+| FIFO aggregate/role boundary | 152 lines | 151 lines | -1 line |
+| shared package | 160 lines | 121 lines | -39 lines |
+| public transaction interface | 176 lines | 151 lines | -25 lines |
+
+`xbar_write_tracker.sv` deliberately remains large.  Its frozen write queues,
+full-payload snapshots, response path, and induction properties are the machinery
+behind the five role production obligations still open in §15.  The endpoint
+channel/pair machinery supporting the separate 19 protocol obligations is likewise
+retained in its focused source files.  Deleting or macro-hiding either would make
+the source shorter without making the proof easier to understand, and would violate
+the C6 handoff.  The 58-line read/write increase above is the local extraction of
+typed fields from the public views; it adds no state or property and is outweighed
+by the 389-line scalar-port and reconstruction removal at the source/role boundary.
+The table changes sum to the exact 783-line active-closure reduction.
+
+### 16.2 Implemented structure
+
+- `axi_sva/axi_fvip_endpoints.sv` is a five-line compilation shell.  It emits
+  the Manager- and Subordinate-polarity endpoint modules from one shared source.
+  The old `m_sva_wrap` and `s_sva_wrap` module APIs were removed, as explicitly
+  permitted for this refactor; aggregates and the DMA harness instantiate the
+  endpoint modules directly.
+- `axi_sva/our/stream_trackers.sv` owns the assertion-free occurrence/rank/
+  occupancy state machine and the assertion-free two-sided ordered-pair state
+  machine once. Thin FIFO and routed-stream shells add policy properties; the
+  AXI read tracker adds only R-beat checking, the pair tracker adds AXI
+  AW/WLAST/WSTRB policy, and the write tracker adds only W distance plus
+  completed-write credit. The duplicate `fifo_tracker.sv` and
+  `xbar_stream_tracker.sv` files are gone.
+- The endpoint transaction shells now use those same mechanisms. The read
+  shell retains only R-beat/RLAST policy. The pair shell retains AXI WLAST,
+  WSTRB, sampling, and progress policy. The write shell retains one inclusive
+  selected-W distance and, only for Manager depth greater than one, the
+  one-bit unmatched-AW ID tags required because AXI4 W has no ID. Its ordered
+  B rank is no longer a separate hand-written tracker.
+- `axi_read_tracker.sv`, `axi_pair_tracker.sv`, and `axi_write_tracker.sv`
+  remain focused files because they own distinct protocol obligations. Folding
+  them into the transaction aggregate would reduce filenames only by turning
+  that sparse connector into a monolith.
+- The xbar aggregate creates four endpoint views and passes those interfaces
+  directly into the role, read, and write modules.  Hundreds of scalar proxy
+  ports and reconstruction assignments were removed; the aggregate is now
+  configuration and instantiation, not a second implementation.
+- Live AXI channels use one parameter-exact vector per payload and separate
+  VALID/READY scalars.  Selected lifecycle fields also remain independent
+  interface objects.  A packed `rd`/`wr`/`pair` experiment was rejected after
+  Questa Formal cached the 4-bit-ID member offsets for the 5-bit-ID output
+  specialization; flat fields are the proven, tool-sound transport while the
+  role modules still receive one compact interface port.
+- Canonical widths and encodings come from `axi_pkg` (`aw_width`, `w_width`,
+  `b_width`, `ar_width`, `r_width`, burst/response enums), replacing the local
+  duplicate enum set and duplicated public/source-role boundary formulas.  The
+  preserved xbar write tracker keeps only its local payload-index geometry.
+- `qverify/flist.f` contains only common endpoint sources, including the shared
+  stream tracker.  The Makefile adds only the selected aggregate's
+  role-specific sources.  The two small policy shells intentionally share
+  that tracker file to avoid another source split.
+
+The refactor did not add DUT hierarchy references, route-dependent environment
+assumptions, selector-dependent legality assumptions, or progress deadlines to
+the unbounded safety profile.  AW/W association remains handshake-based.  The
+legacy xbar write queues and B path remain because their deletion gates are open.
+
+### 16.3 Proof-preservation method
+
+The frozen and refactored D1 protocol runs elaborate the same 286/298/186
+assertion/assumption/cover inventory and no black boxes.  The vacuity ledgers
+are byte-identical: 277 of 285 applicable assertion antecedents are classified
+nonvacuous.  The property ledger improves by exactly four nonvacuous shared-core
+bookkeeping proofs, finishing at 211 proven assertions and 75 assertion
+timeouts; cover status is unchanged at 166 reached and 20 timed out.  The
+optimized formal netlist is also eight bits smaller, 5634 rather than 5642
+state bits.
+
+The C6 execution log records the remaining aggregate, focused, and mutation
+evidence: all 171 FIFO assertions and 109 FIFO covers are resolved; combined
+xbar evidence proves 219 unique assertions (four more than the frozen combined
+215), classifies all 216 proved assertions with applicable antecedents as
+nonvacuous, and reaches the same 196 unique covers; and the final 40-case
+transaction suite passes.  This plan remains an architectural summary rather
+than a second live status ledger.

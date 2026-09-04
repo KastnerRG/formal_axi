@@ -60,7 +60,7 @@ module fv_axi_fifo_fvip #(
     .MAX_WRITE_DATA_DELAY(COMPOSED_WRITE_DATA_DELAY)
   ) m_view ();
 
-  m_axi_fvip #(
+  manager_axi_fvip #(
     .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W),
     .MAX_STALL(MAX_STALL), .ENABLE_MAX_STALL(ENABLE_MAX_STALL),
     .MAX_OUTSTANDING(MAX_OUTSTANDING),
@@ -76,7 +76,7 @@ module fv_axi_fifo_fvip #(
     .clk(clk), .rstn(rstn), .axi(s_axi), .view(s_view)
   );
 
-  s_axi_fvip #(
+  subordinate_axi_fvip #(
     .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W),
     .MAX_STALL(MAX_STALL), .ENABLE_MAX_STALL(ENABLE_MAX_STALL),
     .MAX_OUTSTANDING(MAX_OUTSTANDING),

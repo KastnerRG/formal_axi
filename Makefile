@@ -120,6 +120,18 @@ TB_SOURCE := tb/$(TOP).sv
 ifeq ($(wildcard $(TB_SOURCE)),)
 $(error Formal testbench $(TB_SOURCE) does not exist for ROLE=$(ROLE))
 endif
+
+ifeq ($(ROLE),fifo)
+ROLE_FVIP_SOURCES := \
+	per_role_fvip/fifo/axi_fifo_role_fvip.sv \
+	per_role_fvip/fifo/axi_fifo_fvip.sv
+else ifeq ($(ROLE),xbar)
+ROLE_FVIP_SOURCES := \
+	per_role_fvip/xbar/xbar_read_tracker.sv \
+	per_role_fvip/xbar/xbar_write_tracker.sv \
+	per_role_fvip/xbar/axi_xbar_role_fvip.sv \
+	per_role_fvip/xbar/axi_xbar_fvip.sv
+endif
 endif
 
 WORK_ROOT ?= $(abspath work)
@@ -227,7 +239,9 @@ define write_flist
 	    '+incdir+$(ROOT_DIR)/ip/pulp/axi/include'; \
 	  printf '%s\n' $(FORMAL_DEFINES) $(FORMAL_EXTRA_ARGS); \
 	  printf '%s\n' $(VERILOG_SOURCES); \
-	  printf '%s\n' '-f' '$(BASE_FLIST)' '$(abspath $(TB_SOURCE))'; \
+	  printf '%s\n' '-f' '$(BASE_FLIST)'; \
+	  printf '%s\n' $(foreach source,$(ROLE_FVIP_SOURCES),'$(abspath $(source))'); \
+	  printf '%s\n' '$(abspath $(TB_SOURCE))'; \
 	} > $(RUN_FLIST)
 endef
 

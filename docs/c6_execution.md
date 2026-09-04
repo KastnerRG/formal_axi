@@ -10,6 +10,152 @@ profile; that profile error and its correction are recorded at the live
 handoff below. This document does not reclassify a clean inconclusive result
 as a proof.
 
+### Post-C6 maintainability refactor: 2026-09-04
+
+This is the current source and proof handoff. The frozen ledger below remains
+authoritative: the refactor reproduces its xbar closure, but does not convert
+any of the 19 protocol, five role, or separately bounded-progress open targets
+into production closures.
+
+#### Source result and boundary
+
+The active production checker closure is now **17 SystemVerilog files / 4731
+physical lines**, down from **20 files / 5514 lines** at the frozen handoff:
+three fewer files and 783 fewer lines (14.2%). Deleting the two known-dead files
+outside that closure brings the complete reduction to **five files / 1005
+lines**. The legacy `m_sva_wrap` and `s_sva_wrap` APIs were intentionally
+removed, as permitted for this refactor.
+
+The resulting composition is:
+
+- `axi_sva/axi_fvip_endpoints.sv`, a five-line shell, emits both endpoint
+  polarities from the shared implementation. `AXI_FVIP_MANAGER` selects the Manager
+  form; its documented absence selects the Subordinate form used by direct
+  refinement harnesses.
+- `axi_sva/our/stream_trackers.sv` owns occurrence/rank/occupancy state and
+  two-sided ordered-pair state once; FIFO, routed-stream, and AXI transaction
+  trackers are policy shells around those cores.
+- FIFO and xbar aggregates instantiate endpoints directly. The xbar passes its
+  four public views directly into the source/read/write role modules, removing
+  the former scalar proxy ports and reconstruction assignments.
+- Canonical channel widths and encodings from `axi_pkg` replace the local
+  duplicate enum set and duplicated public/source-role boundary formulas. The
+  preserved xbar write tracker keeps only its local payload-index geometry.
+  The base filelist now contains only common endpoint sources, including the
+  shared stream tracker; the Makefile adds only the selected aggregate's
+  role-specific sources.
+
+The public view deliberately retains parameter-exact flat channel vectors,
+separate VALID/READY scalars, and separate lifecycle fields. A packed
+`rd`/`wr`/`pair` implementation was compiled and tested, but Questa Formal
+2023.2 reused the 4-bit ingress-ID member offsets in the simultaneously
+elaborated 5-bit egress-ID specialization. That produced false role fires.
+Returning to flat interface objects removed the aliasing and reproduced the
+frozen checker inventory and vacuity ledger. The later shared-core
+simplification additionally turns four nonvacuous bookkeeping timeouts into
+proofs. This is a tool-sound boundary, not compatibility work.
+
+No DUT hierarchy reference, route-dependent environment assumption,
+selector-dependent legality assumption, or safety-profile progress deadline
+was introduced. AW/W association remains based on accepted occurrences. The
+legacy xbar write queues, full payload snapshots, and B path remain because
+their replacement proof gates in the frozen ledger are still open.
+
+#### Shared transaction-tracker structure
+
+`stream_trackers.sv` now owns two assertion-free mechanisms:
+`fv_stream_occurrence_core` selects one source occurrence and follows its
+relative rank to an ordered destination, while `fv_ordered_pair_core` matches
+the same ordinal occurrence across two streams that may run ahead of one
+another. The FIFO, routed-stream, read, pair, and write-response modules add
+protocol policy around those two small state machines rather than reimplementing
+their bookkeeping.
+
+The read tracker feeds accepted same-ID AR events and accepted same-ID RLAST
+events into the occurrence core. Its local circuit is only the response-beat
+counter, the live ARLEN/RLAST check, and the optional response-progress timer.
+Consequently the authoritative RLAST equality is checked on every relevant
+RVALID offer; completion is still driven only by an accepted RLAST.
+
+The AW/W tracker feeds accepted AW and completed-W events into the ordered-pair
+core. That core maintains the global signed skew and a selected inclusive
+distance which changes only when the opposite stream advances. The AXI shell
+retains the beat/WLAST/WSTRB sampling, legality properties, and optional
+W-progress timer.
+
+The AW/W/B tracker initializes one inclusive `w_dist` when its arbitrary AW is
+selected, then only decrements it on completed W packets. A normal occurrence
+core handles ordered B completion. For a Manager endpoint at depth greater
+than one, occurrence selection is delayed until the chosen AW's W packet
+completes: before that join, completed-credit occupancy is the B-predecessor
+rank; afterward the occurrence core's frozen rank is authoritative. The small
+one-bit AW-ID tag FIFO remains necessary because AXI4 W carries no ID. It is
+not a second transaction tracker and stores no payload.
+
+The three AXI tracker files remain separate because each contains distinct AXI
+and polarity-specific obligations, not forwarding-only wrapper logic. Folding
+them into `axi_transaction_fvip.sv` would create a much larger aggregate without
+removing meaningful code or state.
+
+#### Formal reproduction
+
+The current proof evidence is:
+
+| Gate | Artifact | Result |
+| --- | --- | --- |
+| Xbar D1 protocol, unbounded safety | `work/runs/20260904_refactor_rw_current_xbar_protocol` | Exact frozen 286/298/186 checker inventory; 211 assertions proved and 75 timed out, a four-proof improvement consisting only of nonvacuous shared-core bookkeeping lemmas; 166 covers reached and 20 timed out; 277/285 assertion antecedents classified nonvacuous; zero fire and zero black boxes. |
+| Xbar D1 full aggregate, unbounded safety | `work/runs/20260904_refactor_rw_current_xbar_full` | Exact frozen 332/315/220 checker inventory. Under four concurrent 32-engine jobs, 206 assertions proved, 126 timed out, 186 covers reached, and 34 timed out; two proved AW checks did not finish their separate vacuity jobs. There was no fire or black box. The next row reconciles every timing-displaced frozen result rather than treating these aggregate timeouts as proof loss. |
+| Xbar full focused reconciliation | `work/runs/20260904_refactor_rw_current_xbar_full_focus` and `work/runs/20260904_refactor_rw_current_xbar_full_recovery_focus` | The first exact-profile job proves the historical focused assertion nonvacuously and reaches the historical source-0 interleave cover. The second proves all 13 frozen assertions and reaches all nine frozen covers displaced by aggregate contention, and reproves the two aggregate AW checks nonvacuously. Combined exact-current evidence is 219 unique assertion proofs, four more than the frozen combined 215, and 196 unique covers, exactly matching frozen combined reachability. All 216 proved assertions with an applicable antecedent are classified nonvacuous; the other three are configuration assertions. The vacuity union restores the frozen 317/329 completed ledger; zero fire and zero black boxes. |
+| FIFO full aggregate | `work/runs/20260904_refactor_rw_current_fifo_full` | 171 assertions, 167 assumptions, and 109 covers: 146 proofs plus 21 classified-vacuous proofs, four clean timeouts, 86 covers reached, and 23 proved uncoverable. All 170 applicable vacuity checks complete (149 nonvacuous, 21 unreachable); zero fire and zero black boxes. Its property and vacuity ledgers are byte-identical to the frozen aggregate. |
+| FIFO WSTRB focus | `work/runs/20260904_refactor_rw_current_fifo_wstrb_directionals` and `work/runs/20260904_refactor_rw_current_fifo_pair_wstrb_focus` | The four aggregate timeouts all prove nonvacuously on the identical profile. The three directionals close in 642 seconds; the final canonical pair property proves directly after 1750 seconds with no promoted assertion. Thus all 171 FIFO assertions and all 109 covers are resolved across the aggregate and focused artifacts. |
+
+The protocol checker inventory and vacuity ledger are byte-identical to the
+frozen reference. The property ledger differs in exactly four assertion status
+rows, each changing from inconclusive to proven:
+
+- `property_status.csv` SHA-256:
+  `6cd3db911c0c376a283691bb337876c6cc63546890a4f4538684c93466153292`;
+- `vacuity_status.csv` SHA-256:
+  `b9adb5636630abd5d99f3e724207ac8e5f6ea43f604c15a740f927775da4f600`.
+
+The default and non-default-burst DMA compile gates are
+`work/build/20260904_refactor_rw_current_dma_burst8_compile` and
+`work/build/20260904_refactor_rw_current_dma_burst4_compile`. Both compile the two endpoint
+polarities and all transaction trackers with zero errors, zero warnings, and
+the two expected suppressed diagnostics, retained in each artifact's
+`compile.log`. The burst-four gate specifically checks that the DMA endpoint
+and public view receive the same non-default `MAX_BURST_LEN`. Exact-current-tree
+full xbar and FIFO compile transcripts are retained at
+`work/build/20260904_refactor_rw_current_xbar_full_compile/compile.log` and
+`work/build/20260904_refactor_rw_current_fifo_full_compile/compile.log`; both have the
+same clean diagnostic counts.
+
+#### Semantic validation
+
+The following exact-current-source gates are clean:
+
+- `work/runs/20260904_refactor_rw_current_pair_summary`: 13/13
+  assertions proved nonvacuously and 6/6 covers reached;
+- `work/runs/20260904_refactor_rw_current_public_pair`:
+  23/23 assertions proved nonvacuously, 18/18 covers reached, and no unexpected
+  assumption used;
+- `work/runs/20260904_refactor_rw_current_link_mutations`: exactly the four
+  intended polarity/stability failures, with no unexpected or inconclusive
+  result;
+- `work/runs/20260904_refactor_rw_current_manager_offer`: all 12
+  legal/bad offer-level cases pass their setup, escape, guard, terminal, and
+  compile gates;
+- `work/runs/20260904_refactor_rw_current_fifo_mutations`: the
+  good FIFO is quiet and phantom, drop, duplicate, corrupt, reorder, and
+  deadlock are detected by both the independent oracle and production tracker.
+
+The final transaction sweep is
+`work/runs/20260904_refactor_rw_current_transaction_mutations`. All 40 cases
+pass: 11 legal/isolation cases are quiet, all 29 negative cases produce their
+intended detections, and there are zero unexpected fires and zero inconclusive
+results. Every applicable sequence, guard, and READY-low reachability gate
+passes; all 40 compile with zero errors, warnings, or black boxes.
+
 ### Refactor-stop handoff: 2026-09-04
 
 This is the frozen stopping point for the planned major refactor.  Every
@@ -123,7 +269,7 @@ allowed when it is stated entirely over the public ports/FVIP view.  Keep
 role composition acyclic: only independently proved assertions may be
 promoted, and each artifact must record the exact promoted set.
 
-Use one arbitrary watched ingress/source (the DUT's slave-facing request
+Use one arbitrary watched ingress/source (the DUT's subordinate-facing request
 port), one arbitrary mapped egress/destination, one arbitrary ID, occurrence,
 beat, lane or payload bit, and request class.  Those ghost choices are stable
 and range constrained.  They select an occurrence from otherwise arbitrary
@@ -1095,7 +1241,7 @@ role state, but it does not by itself provide the missing induction needed
 for selected payload/response closure. Do not restore the duplicate counters
 or interpret the focused inconclusive result as a failure.
 
-The first protocol-lemma batch after this refactor split the two slave-side
+The first protocol-lemma batch after this refactor split the two subordinate-side
 read and write no-orphan obligations into four standalone jobs:
 
 - `20260903_c6_protocol_s0_r_has_ar_pairshared_xbar_zipcpu_axixbar_protocol_d2_ft0`
@@ -1531,7 +1677,7 @@ The matching output 0/1 jobs promoted only their local, previously proven
 after 180 seconds, using 21.1/23.8 GiB. Those artifacts are
 `20260903_c6_read_rank_m0_composed_xbar_zipcpu_axixbar_protocol_d2_ft0` and
 `20260903_c6_read_rank_m1_composed_xbar_zipcpu_axixbar_protocol_d2_ft0`.
-Therefore the production assertion is retained only under `MASTER`, matching
+Therefore the production assertion is retained only under `AXI_FVIP_MANAGER`, matching
 the selected input state consumed by the role, and the two unproved output
 instances are not added to the open protocol target set. Lesson: a generic
 lemma may still have materially different induction complexity by polarity;
@@ -1614,7 +1760,7 @@ assertion promoted:
 - `20260903_c6_write_data_state_s1_xbar_zipcpu_axixbar_protocol_d2_ft0`.
 
 Each job used 8.5 GiB total peak engine memory. This is pure observer
-bookkeeping and is retained under `MASTER`, alongside the already-proven
+bookkeeping and is retained under `AXI_FVIP_MANAGER`, alongside the already-proven
 selected-W rank invariant. It is suitable for protocol-only composition into
 the two remaining input `x_b_has_completed_write` checks.
 
@@ -1710,7 +1856,7 @@ crossbar role hierarchy. Protocol lemmas may mention port signals and generic
 FVIP observer state only, never route/decode knowledge or DUT internals.
 `LEVEL=full` retains those checks and adds crossbar functionality consuming
 only the four public transaction views. The role has one stable arbitrary
-`watch_source` selecting either DUT input/slave, then one arbitrary route,
+`watch_source` selecting either DUT input/subordinate port, then one arbitrary route,
 read/write class, ID, occurrence, beat, and bit. There is no role tracker per
 input. Endpoint selected-transaction, outstanding/rank, beat/completion, and
 AW/W-skew state is reused; proof-target partitioning must not duplicate state.
@@ -2434,7 +2580,7 @@ four, and no sequential tag state at depth one. A smaller
 property as an induction assumption to exclude earlier bad-B histories, so
 the standalone robust observer is retained for rigor.
 
-The new unconditional DUT-input (`MASTER`) target is
+The new unconditional DUT-input (`AXI_FVIP_MANAGER`) target is
 `x_b_has_per_id_completed_write`. The zero-state bridge
 was ultimately reduced to the independently inductive
 `a_tracker_pending_w_credit_rank_exact`: while a selected write awaits W,
@@ -4917,7 +5063,7 @@ selected AW with its W packet in either arrival order.  The pair tracker keeps
 only an opposite-side rank, the selected burst summaries, and an arbitrary
 beat/WSTRB-lane sample.  The canonical arbitrary W payload-bit sample belongs
 to the enclosing endpoint FVIP and is reused by the role layer.  For a DUT
-input (`MASTER` polarity), the write-response tracker ranks completed same-ID
+input (`AXI_FVIP_MANAGER` polarity), the write-response tracker ranks completed same-ID
 predecessors and can increment that rank as older selected-before-W writes
 finish their data.  For a DUT output, it ranks all accepted same-ID AW
 predecessors and separately asserts that any offered B has completed W data.
@@ -5135,7 +5281,7 @@ its report SHA-256 is
 That run directly measured 286/298/186 checkers and 144/149/95 directives
 because the then-current generic spelling also elaborated two unused
 input-polarity capture instances.  The helper is now guarded by
-`ifndef MASTER`, retaining the two proved output instances and deleting the
+`ifndef AXI_FVIP_MANAGER`, retaining the two proved output instances and deleting the
 two irrelevant input instances.  A narrow output-only zero-skew association
 leaf was added at the same time, so the current checker/directive totals stay
 286/298/186 and 144/149/95 rather than growing.

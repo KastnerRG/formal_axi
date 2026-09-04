@@ -25,21 +25,24 @@ counter for phantom, overflow, and duplication checks.
 
 | File | Purpose |
 | --- | --- |
-| [`pkg_axi_fvip.sv`](../axi_sva/our/pkg_axi_fvip.sv) | Shared AXI enums and small geometry helpers. |
-| [`axi_switch_fvip.svh`](../axi_sva/our/axi_switch_fvip.svh) | Selects Manager/Subordinate module names and assume/assert polarity. |
+| [`pkg_axi_fvip.sv`](../axi_sva/our/pkg_axi_fvip.sv) | Local burst-geometry helpers layered on the canonical `axi_pkg` constants and widths. |
 | [`axi_channel_fvip.sv`](../axi_sva/our/axi_channel_fvip.sv) | Intra-channel AXI4 rules, ordered like the specification. |
 | [`axi_fvip_env_contract.sv`](../axi_sva/our/axi_fvip_env_contract.sv) | Universal bounded contracts for environment-owned transactions. |
-| [`axi_read_tracker.sv`](../axi_sva/our/axi_read_tracker.sv) | Selected AR occurrence, same-ID rank, R beats, RID/RLAST, and response progress. |
-| [`axi_pair_tracker.sv`](../axi_sva/our/axi_pair_tracker.sv) | Selected AW/W association in either arrival order, WLAST/WSTRB, and W progress. |
-| [`axi_write_tracker.sv`](../axi_sva/our/axi_write_tracker.sv) | Selected AW through its paired W burst and ordered BID/B response. |
+| [`axi_read_tracker.sv`](../axi_sva/our/axi_read_tracker.sv) | Thin read shell: shared selected AR occurrence plus R-beat/RLAST and response-progress policy. |
+| [`axi_pair_tracker.sv`](../axi_sva/our/axi_pair_tracker.sv) | Thin AXI shell around the shared two-sided AW/W occurrence core, adding WLAST/WSTRB and W-progress policy. |
+| [`axi_write_tracker.sv`](../axi_sva/our/axi_write_tracker.sv) | Thin write shell: selected-AW W distance, completed-write credit, and a shared ordered B occurrence. |
 | [`axi_transaction_fvip.sv`](../axi_sva/our/axi_transaction_fvip.sv) | Connects the three transaction trackers and enforces global outstanding bounds. |
-| [`axi_fvip_txn_view_if.sv`](../axi_sva/our/axi_fvip_txn_view_if.sv) | Typed public boundary containing live AXI records and selected transaction state. |
-| [`axi_fvip.sv`](../axi_sva/our/axi_fvip.sv) | Standalone endpoint aggregate; exposes `m_axi_fvip` or `s_axi_fvip`. |
+| [`stream_trackers.sv`](../axi_sva/our/stream_trackers.sv) | Shared occurrence/rank/occupancy and two-sided ordered-pair cores, plus thin FIFO and routed-stream policy shells. |
+| [`axi_fvip_txn_view_if.sv`](../axi_sva/our/axi_fvip_txn_view_if.sv) | Parameter-exact live channel vectors and flat selected-transaction state shared with role checkers. |
+| [`axi_fvip.sv`](../axi_sva/our/axi_fvip.sv) | Standalone endpoint aggregate; exposes `manager_axi_fvip` or `subordinate_axi_fvip`. |
 
-[`m_sva_wrap.sv`](../axi_sva/m_sva_wrap.sv) and
-[`s_sva_wrap.sv`](../axi_sva/s_sva_wrap.sv) adapt the endpoint checkers to the
-repository harnesses. [`qverify/flist.f`](../qverify/flist.f) is the production
-source order.
+The legacy `m_sva_wrap` and `s_sva_wrap` adapters have been removed.
+[`qverify/flist.f`](../qverify/flist.f) uses
+[`axi_fvip_endpoints.sv`](../axi_sva/axi_fvip_endpoints.sv) solely to compile
+`manager_axi_fvip` and `subordinate_axi_fvip` from the shared endpoint source; that source owns
+the compile-time polarity mapping. Role aggregates
+instantiate those modules directly; the DMA harness directly instantiates
+`subordinate_axi_fvip`.
 
 ## Role and validation files
 

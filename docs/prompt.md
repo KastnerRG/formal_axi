@@ -24,7 +24,7 @@ In AXI, there are three FIFOs.
   3. (AW+W) -> B. Now this cant be proven with (2). Because B, the f(x) has no identifiable info. it just has OKAY/ERROR, where all transactions may be OKAY. So, we can use (1) to prove this.
 4. We build this cross-channel FIFO tracking infra in `per_role_fvip/fifo/`, and keep it very minimal, concise and readable.
 5. We test zipcpu's axi fifo with our fvip and tighten everything to make sure we can prove/disprove that.
-6. Once that works, we move to a 2x2 axi crossbar. for the 2 masters, we choose an arbitary mid, and prove the crossbar can route it while adhreing to protocol. Tighten anything else.
+6. Once that works, we move to a 2x2 axi crossbar. for the 2 managers, we choose an arbitary mid, and prove the crossbar can route it while adhreing to protocol. Tighten anything else.
 7. We scale to prove, say a 6x6 crossbar.
 8. We prove a DMA and other IPs.
 9. The ultimate goal is to prove most of the IPs in ./soc-testbed, and if some have real bugs, analyze the counterexample trace to create a simple SV tb to recreate the bug to be submitted as PR in their repos.

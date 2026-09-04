@@ -385,7 +385,7 @@ module tb_transaction_mutation #(
   // WLAST/WSTRB mutations use Subordinate polarity so those rules are asserts.
   generate if (MUTATION == 4 || MUTATION == 5 || MUTATION == 13 ||
                (MUTATION >= 20 && MUTATION <= 25)) begin : g_source
-    s_axi_transaction_fvip #(
+    subordinate_axi_transaction_fvip #(
       .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W),
       .MAX_READ_OUTSTANDING(2), .MAX_WRITE_OUTSTANDING(2),
       .MAX_AW_AHEAD(2), .MAX_W_AHEAD(2),
@@ -400,7 +400,7 @@ module tb_transaction_mutation #(
         step == 1 |-> i_txn.i_aw_w_tracker.select_w);
     end
   end else begin : g_response
-    m_axi_transaction_fvip #(
+    manager_axi_transaction_fvip #(
       .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W),
       .MAX_READ_OUTSTANDING(2), .MAX_WRITE_OUTSTANDING(2),
       .MAX_AW_AHEAD(2), .MAX_W_AHEAD(2),
@@ -564,7 +564,7 @@ module tb_axi_fvip_response_view_mutation #(
     endcase
   end
 
-  m_axi_fvip #(
+  manager_axi_fvip #(
     .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W),
     .MAX_STALL(6), .ENABLE_MAX_STALL(1'b0),
     .MAX_OUTSTANDING(2), .MAX_AW_AHEAD(2), .MAX_W_AHEAD(2),
@@ -662,6 +662,44 @@ module tb_axi_fvip_response_view_mutation #(
 endmodule
 
 
+// Preserve the parameter-exact live-channel boundary in role unit tests while
+// keeping its mechanical payload/VALID/READY wiring in one place.
+`define TB_BIND_ROLE_LIVE(VIEW, REQ, RSP, W_BEAT) \
+  VIEW.live_aw = REQ.aw; \
+  VIEW.live_aw_valid = REQ.aw_valid; \
+  VIEW.live_aw_ready = RSP.aw_ready; \
+  VIEW.live_w = REQ.w; \
+  VIEW.live_w_valid = REQ.w_valid; \
+  VIEW.live_w_ready = RSP.w_ready; \
+  VIEW.live_b = RSP.b; \
+  VIEW.live_b_valid = RSP.b_valid; \
+  VIEW.live_b_ready = REQ.b_ready; \
+  VIEW.live_ar = REQ.ar; \
+  VIEW.live_ar_valid = REQ.ar_valid; \
+  VIEW.live_ar_ready = RSP.ar_ready; \
+  VIEW.live_r = RSP.r; \
+  VIEW.live_r_valid = RSP.r_valid; \
+  VIEW.live_r_ready = REQ.r_ready; \
+  VIEW.channel_w_beat = W_BEAT
+
+`define TB_CLEAR_ROLE_STATE(VIEW) \
+  {VIEW.rd_select, VIEW.rd_watch_id, VIEW.rd_selected, VIEW.rd_pending, \
+   VIEW.rd_completed, VIEW.rd_rank, VIEW.rd_outstanding, VIEW.rd_ar, \
+   VIEW.rd_beat_idx, VIEW.rd_rsp_beat, VIEW.rd_r, VIEW.rd_beat_sampled, \
+   VIEW.rd_rsp_visible, VIEW.rd_rsp_complete, VIEW.rd_rsp_wait_cycles} = '0; \
+  {VIEW.wr_select, VIEW.wr_watch_id, VIEW.wr_selected, VIEW.wr_pending, \
+   VIEW.wr_completed, VIEW.wr_rank, VIEW.wr_outstanding, VIEW.wr_aw, \
+   VIEW.wr_data_pending, VIEW.wr_data_rank, VIEW.wr_data_complete, \
+   VIEW.wr_b, VIEW.wr_rsp_visible, VIEW.wr_rsp_complete, \
+   VIEW.wr_rsp_wait_cycles} = '0; \
+  {VIEW.pair_select_aw, VIEW.pair_select_w, VIEW.pair_selected, \
+   VIEW.pair_pending_aw, VIEW.pair_pending_w, VIEW.pair_completed, \
+   VIEW.pair_rank, VIEW.pair_skew, VIEW.pair_aw, VIEW.wr_beat_idx, \
+   VIEW.wr_w, VIEW.wr_beat_sampled, VIEW.pair_w_payload_idx, \
+   VIEW.pair_w_payload_bit, VIEW.pair_w_payload_available, \
+   VIEW.wr_data_visible, VIEW.wr_data_burst_complete, \
+   VIEW.wr_data_wait_cycles} = '0
+
 // Deterministic unit harness for the selected xbar response relation.  The
 // endpoint protocol trackers are represented by their public scalar state;
 // this keeps a role mutation from being mistaken for a second protocol test.
@@ -704,6 +742,8 @@ module tb_xbar_role_response_mutation #(
     addr_t, in_id_t, data_t, strb_t, user_t)
   `AXI_TYPEDEF_ALL_CT(role_out_axi, out_req_t, out_rsp_t,
     addr_t, out_id_t, data_t, strb_t, user_t)
+  localparam in_req_t IDLE_IN_REQ = '0;
+  localparam in_rsp_t IDLE_IN_RSP = '0;
 
   logic [3:0] step;
   in_req_t s_req;
@@ -711,10 +751,35 @@ module tb_xbar_role_response_mutation #(
   out_req_t m0_req, m1_req;
   out_rsp_t m0_rsp, m1_rsp;
 
+  axi_fvip_txn_view_if #(
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(IN_ID_W), .USER_W(USER_W),
+    .MAX_OUTSTANDING(MAX_OUTSTANDING),
+    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD),
+    .MAX_BURST_LEN(MAX_BURST_LEN)
+  ) s0_view ();
+  axi_fvip_txn_view_if #(
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(IN_ID_W), .USER_W(USER_W),
+    .MAX_OUTSTANDING(MAX_OUTSTANDING),
+    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD),
+    .MAX_BURST_LEN(MAX_BURST_LEN)
+  ) s1_view ();
+  axi_fvip_txn_view_if #(
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(OUT_ID_W), .USER_W(USER_W),
+    .MAX_OUTSTANDING(MAX_OUTSTANDING),
+    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD),
+    .MAX_BURST_LEN(MAX_BURST_LEN)
+  ) m0_view ();
+  axi_fvip_txn_view_if #(
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(OUT_ID_W), .USER_W(USER_W),
+    .MAX_OUTSTANDING(MAX_OUTSTANDING),
+    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD),
+    .MAX_BURST_LEN(MAX_BURST_LEN)
+  ) m1_view ();
+
   logic signed [PAIR_SKEW_W-1:0] s_pair_skew;
-  logic signed [PAIR_SKEW_W-1:0] m0_pair_skew, m1_pair_skew;
+  logic signed [PAIR_SKEW_W-1:0] m0_pair_skew;
   logic [W_BEAT_W-1:0] s_channel_w_beat;
-  logic [W_BEAT_W-1:0] m0_channel_w_beat, m1_channel_w_beat;
+  logic [W_BEAT_W-1:0] m0_channel_w_beat;
   logic s_rd_select, s_rd_pending, s_rd_completed;
   logic [IN_ID_W-1:0] s_rd_watch_id;
   logic [7:0] s_rd_watch_beat, s_rd_rsp_beat;
@@ -724,10 +789,8 @@ module tb_xbar_role_response_mutation #(
   logic [IN_ID_W-1:0] s_wr_watch_id;
   logic [7:0] s_wr_watch_beat;
   logic [STATE_W-1:0] s_wr_rank, s_wr_data_rank;
-  logic [OUT_ID_W-1:0] m0_rd_watch_id, m1_rd_watch_id;
-  logic [OUT_ID_W-1:0] m0_wr_watch_id, m1_wr_watch_id;
-  logic [STATE_W-1:0] m0_rd_outstanding, m1_rd_outstanding;
-  logic [STATE_W-1:0] m0_wr_outstanding, m1_wr_outstanding;
+  logic [OUT_ID_W-1:0] m0_rd_watch_id, m0_wr_watch_id;
+  logic [STATE_W-1:0] m0_rd_outstanding, m0_wr_outstanding;
 
   wire read_case = MUTATION >= 26 && MUTATION <= 31;
   wire write_case = MUTATION >= 32 && MUTATION <= 36;
@@ -765,31 +828,81 @@ module tb_xbar_role_response_mutation #(
   wire m0_pair_w_payload_available =
     write_case && !write_error_case && step >= 4;
 
-  wire m1_pair_select_aw = 1'b0;
-  wire m1_pair_select_w = 1'b0;
-  wire m1_pair_pending_aw = 1'b0;
-  wire m1_pair_pending_w = 1'b0;
-  wire m1_pair_completed = 1'b0;
-  wire [STATE_W-1:0] m1_pair_rank = '0;
-  wire [7:0] m1_pair_watch_beat = '0;
-  wire [W_PAYLOAD_BIT_W-1:0] m1_pair_w_payload_idx = '0;
-  wire m1_pair_w_payload_bit = 1'b0;
-  wire m1_pair_w_payload_available = 1'b0;
-
   // Deterministic public endpoint-B observer model.  Case 32 first leaves
   // the selected output response stalled and live, then accepts it at step 5
   // and retains its all-zero {ID, RESP, USER} snapshot from step 6 onward.
   // Case 33 preserves the original both-BREADY-low corruption scenario.
   wire m0_wr_select = write_case && !write_error_case && step == 2;
-  wire m1_wr_select = 1'b0;
+  wire m0_wr_selected = write_case && !write_error_case && step >= 3;
   wire m0_wr_completed = MUTATION == 32 && step >= 6;
-  wire m1_wr_completed = 1'b0;
   wire m0_wr_rsp_visible = write_case && !write_error_case && step >= 4 &&
     !m0_wr_completed && m0_rsp.b_valid &&
     m0_rsp.b.id == m0_wr_watch_id;
-  wire m1_wr_rsp_visible = 1'b0;
   wire [OUT_B_W-1:0] m0_wr_b_bits = '0;
-  wire [OUT_B_W-1:0] m1_wr_b_bits = '0;
+
+  // Adapt the deterministic scalar observer model to the same public endpoint
+  // boundary used by the aggregate xbar checker.  Live channels remain split
+  // from VALID/READY here, matching the production binding.
+  always_comb begin
+    `TB_CLEAR_ROLE_STATE(s0_view);
+    `TB_BIND_ROLE_LIVE(s0_view, s_req, s_rsp, s_channel_w_beat);
+    s0_view.rd_select = s_rd_select;
+    s0_view.rd_watch_id = s_rd_watch_id;
+    s0_view.rd_beat_idx = s_rd_watch_beat;
+    s0_view.rd_pending = s_rd_pending;
+    s0_view.rd_completed = s_rd_completed;
+    s0_view.rd_rank = s_rd_rank;
+    s0_view.rd_rsp_beat = s_rd_rsp_beat;
+    s0_view.rd_rsp_visible = s_rd_rsp_visible;
+    s0_view.wr_select = s_wr_select;
+    s0_view.wr_watch_id = s_wr_watch_id;
+    s0_view.wr_beat_idx = s_wr_watch_beat;
+    s0_view.wr_pending = s_wr_pending;
+    s0_view.wr_completed = s_wr_completed;
+    s0_view.wr_rank = s_wr_rank;
+    s0_view.wr_data_pending = s_wr_data_pending;
+    s0_view.wr_data_rank = s_wr_data_rank;
+    s0_view.wr_data_complete = s_wr_data_complete;
+    s0_view.wr_rsp_visible = s_wr_rsp_visible;
+    s0_view.pair_skew = s_pair_skew;
+    s0_view.pair_select_aw = s_pair_select_aw;
+    s0_view.pair_pending_aw = s_pair_pending_aw;
+    s0_view.pair_pending_w = s_pair_pending_w;
+    s0_view.pair_completed = s_pair_completed;
+    s0_view.pair_rank = s_pair_rank;
+    s0_view.pair_w_payload_idx = s_pair_w_payload_idx;
+    s0_view.pair_w_payload_bit = s_pair_w_payload_bit;
+    s0_view.pair_w_payload_available = s_pair_w_payload_available;
+
+    `TB_CLEAR_ROLE_STATE(s1_view);
+    `TB_BIND_ROLE_LIVE(s1_view, IDLE_IN_REQ, IDLE_IN_RSP, '0);
+
+    `TB_CLEAR_ROLE_STATE(m0_view);
+    `TB_BIND_ROLE_LIVE(m0_view, m0_req, m0_rsp, m0_channel_w_beat);
+    m0_view.rd_watch_id = m0_rd_watch_id;
+    m0_view.rd_outstanding = m0_rd_outstanding;
+    m0_view.wr_watch_id = m0_wr_watch_id;
+    m0_view.wr_outstanding = m0_wr_outstanding;
+    m0_view.wr_select = m0_wr_select;
+    m0_view.wr_selected = m0_wr_selected;
+    m0_view.wr_completed = m0_wr_completed;
+    m0_view.wr_rsp_visible = m0_wr_rsp_visible;
+    m0_view.wr_b = m0_wr_b_bits;
+    m0_view.pair_skew = m0_pair_skew;
+    m0_view.pair_select_aw = m0_pair_select_aw;
+    m0_view.pair_select_w = m0_pair_select_w;
+    m0_view.pair_pending_aw = m0_pair_pending_aw;
+    m0_view.pair_pending_w = m0_pair_pending_w;
+    m0_view.pair_completed = m0_pair_completed;
+    m0_view.pair_rank = m0_pair_rank;
+    m0_view.wr_beat_idx = m0_pair_watch_beat;
+    m0_view.pair_w_payload_idx = m0_pair_w_payload_idx;
+    m0_view.pair_w_payload_bit = m0_pair_w_payload_bit;
+    m0_view.pair_w_payload_available = m0_pair_w_payload_available;
+
+    `TB_CLEAR_ROLE_STATE(m1_view);
+    `TB_BIND_ROLE_LIVE(m1_view, m1_req, m1_rsp, '0);
+  end
 
   always_ff @(posedge clk or negedge rstn) begin
     if (!rstn)
@@ -839,10 +952,8 @@ module tb_xbar_role_response_mutation #(
 
     s_pair_skew = '0;
     m0_pair_skew = '0;
-    m1_pair_skew = '0;
     s_channel_w_beat = '0;
     m0_channel_w_beat = '0;
-    m1_channel_w_beat = '0;
 
     s_rd_select = 1'b0;
     s_rd_pending = read_case && step >= 2;
@@ -863,15 +974,11 @@ module tb_xbar_role_response_mutation #(
     s_wr_data_complete = write_case && step >= 3;
 
     m0_rd_watch_id = {1'b0, {IN_ID_W{1'b0}}};
-    m1_rd_watch_id = {1'b0, {IN_ID_W{1'b0}}};
     m0_wr_watch_id = {1'b0, {IN_ID_W{1'b0}}};
-    m1_wr_watch_id = {1'b0, {IN_ID_W{1'b0}}};
     m0_rd_outstanding = read_case && !read_error_case && step >= 3 ?
       STATE_W'(1) : '0;
-    m1_rd_outstanding = '0;
     m0_wr_outstanding = write_case && !write_error_case && step >= 3 &&
       !(MUTATION == 32 && step >= 6) ? STATE_W'(1) : '0;
-    m1_wr_outstanding = '0;
 
     if (read_case) begin
       if (step == 1) begin
@@ -1002,70 +1109,8 @@ module tb_xbar_role_response_mutation #(
     .DEFAULT_DEST(2'b00), .ERROR_RDATA(ERROR_RDATA)
   ) i_role (
     .clk(clk), .rstn(rstn), .source(1'b0),
-    .s_pair_skew(s_pair_skew),
-    .m0_pair_skew(m0_pair_skew), .m1_pair_skew(m1_pair_skew),
-    .s_pair_select_aw(s_pair_select_aw),
-    .s_pair_pending_aw(s_pair_pending_aw),
-    .s_pair_pending_w(s_pair_pending_w),
-    .s_pair_completed(s_pair_completed),
-    .s_pair_rank(s_pair_rank),
-    .s_pair_w_payload_idx(s_pair_w_payload_idx),
-    .s_pair_w_payload_bit(s_pair_w_payload_bit),
-    .s_pair_w_payload_available(s_pair_w_payload_available),
-    .m0_pair_select_aw(m0_pair_select_aw),
-    .m1_pair_select_aw(m1_pair_select_aw),
-    .m0_pair_select_w(m0_pair_select_w),
-    .m1_pair_select_w(m1_pair_select_w),
-    .m0_pair_pending_aw(m0_pair_pending_aw),
-    .m1_pair_pending_aw(m1_pair_pending_aw),
-    .m0_pair_pending_w(m0_pair_pending_w),
-    .m1_pair_pending_w(m1_pair_pending_w),
-    .m0_pair_completed(m0_pair_completed),
-    .m1_pair_completed(m1_pair_completed),
-    .m0_pair_rank(m0_pair_rank),
-    .m1_pair_rank(m1_pair_rank),
-    .m0_pair_watch_beat(m0_pair_watch_beat),
-    .m1_pair_watch_beat(m1_pair_watch_beat),
-    .m0_pair_w_payload_idx(m0_pair_w_payload_idx),
-    .m1_pair_w_payload_idx(m1_pair_w_payload_idx),
-    .m0_pair_w_payload_bit(m0_pair_w_payload_bit),
-    .m1_pair_w_payload_bit(m1_pair_w_payload_bit),
-    .m0_pair_w_payload_available(m0_pair_w_payload_available),
-    .m1_pair_w_payload_available(m1_pair_w_payload_available),
-    .s_channel_w_beat(s_channel_w_beat),
-    .m0_channel_w_beat(m0_channel_w_beat),
-    .m1_channel_w_beat(m1_channel_w_beat),
-    .s_rd_select(s_rd_select), .s_rd_watch_id(s_rd_watch_id),
-    .s_rd_watch_beat(s_rd_watch_beat), .s_rd_pending(s_rd_pending),
-    .s_rd_completed(s_rd_completed), .s_rd_rank(s_rd_rank),
-    .s_rd_rsp_beat(s_rd_rsp_beat),
-    .s_rd_rsp_visible(s_rd_rsp_visible),
-    .s_wr_select(s_wr_select), .s_wr_watch_id(s_wr_watch_id),
-    .s_wr_watch_beat(s_wr_watch_beat), .s_wr_pending(s_wr_pending),
-    .s_wr_completed(s_wr_completed), .s_wr_rank(s_wr_rank),
-    .s_wr_data_pending(s_wr_data_pending),
-    .s_wr_data_rank(s_wr_data_rank),
-    .s_wr_data_complete(s_wr_data_complete),
-    .s_wr_rsp_visible(s_wr_rsp_visible),
-    .m0_rd_watch_id(m0_rd_watch_id),
-    .m1_rd_watch_id(m1_rd_watch_id),
-    .m0_rd_outstanding(m0_rd_outstanding),
-    .m1_rd_outstanding(m1_rd_outstanding),
-    .m0_wr_watch_id(m0_wr_watch_id),
-    .m1_wr_watch_id(m1_wr_watch_id),
-    .m0_wr_outstanding(m0_wr_outstanding),
-    .m1_wr_outstanding(m1_wr_outstanding),
-    .m0_wr_select(m0_wr_select),
-    .m1_wr_select(m1_wr_select),
-    .m0_wr_completed(m0_wr_completed),
-    .m1_wr_completed(m1_wr_completed),
-    .m0_wr_rsp_visible(m0_wr_rsp_visible),
-    .m1_wr_rsp_visible(m1_wr_rsp_visible),
-    .m0_wr_b_bits(m0_wr_b_bits),
-    .m1_wr_b_bits(m1_wr_b_bits),
-    .s_req_bits(s_req), .s_rsp_bits(s_rsp),
-    .m0_req_bits(m0_req), .m0_rsp_bits(m0_rsp),
-    .m1_req_bits(m1_req), .m1_rsp_bits(m1_rsp)
+    .s0_view(s0_view), .s1_view(s1_view),
+    .m0_view(m0_view), .m1_view(m1_view)
   );
 
   if (MUTATION >= 26 && MUTATION <= 31) begin : g_read_partition
@@ -1132,3 +1177,6 @@ module tb_xbar_role_response_mutation #(
   c_role_sequence_reached: cover property (
     @(posedge clk) disable iff (!rstn) step == 7);
 endmodule
+
+`undef TB_BIND_ROLE_LIVE
+`undef TB_CLEAR_ROLE_STATE

@@ -1,11 +1,34 @@
-`include "axi_switch_fvip.svh"
-`include "axi/assign.svh"
+// axi_fvip_endpoints.sv includes this once with AXI_FVIP_MANAGER and once without it.
+// The documented default is the Subordinate polarity, also used by focused
+// harnesses that compile this source directly.
+`ifdef AXI_FVIP_MANAGER
+  `define MODNAME_AXI manager_axi_fvip
+  `define MODNAME_TXN manager_axi_transaction_fvip
+  `define MODNAME_READ_TRACKER manager_axi_read_tracker
+  `define MODNAME_PAIR_TRACKER manager_axi_pair_tracker
+  `define MODNAME_WRITE_TRACKER manager_axi_write_tracker
+  `define TXN_SOURCE assume
+  `define TXN_DEST assert
+`else
+  `define MODNAME_AXI subordinate_axi_fvip
+  `define MODNAME_TXN subordinate_axi_transaction_fvip
+  `define MODNAME_READ_TRACKER subordinate_axi_read_tracker
+  `define MODNAME_PAIR_TRACKER subordinate_axi_pair_tracker
+  `define MODNAME_WRITE_TRACKER subordinate_axi_write_tracker
+  `define TXN_SOURCE assert
+  `define TXN_DEST assume
+`endif
+
+`include "axi_read_tracker.sv"
+`include "axi_pair_tracker.sv"
+`include "axi_write_tracker.sv"
+`include "axi_transaction_fvip.sv"
 
 // Standalone bounded AXI4 endpoint checker.
 //
-// Polarity is selected by axi_switch_fvip.svh:
-//   m_axi_fvip checks an environment Manager against a DUT Subordinate.
-//   s_axi_fvip checks a DUT Manager against an environment Subordinate.
+// Polarity is selected by axi_fvip_endpoints.sv:
+//   manager_axi_fvip checks an environment Manager against a DUT Subordinate.
+//   subordinate_axi_fvip checks a DUT Manager against an environment Subordinate.
 // Every rule follows ownership: environment-driven behavior is assumed and
 // DUT-driven behavior is asserted.  Role behavior is intentionally absent.
 module `MODNAME_AXI #(
@@ -42,26 +65,20 @@ module `MODNAME_AXI #(
     (MAX_BURST_LEN < 2) ? 1 : $clog2(MAX_BURST_LEN);
   localparam int W_BEAT_W = (MAX_BURST_LEN < 1) ?
     1 : $clog2(MAX_BURST_LEN + 1);
-  localparam int W_PAYLOAD_W = DATA_W + DATA_W/8 + 1 + USER_W;
+  localparam int W_PAYLOAD_W = axi_pkg::w_width(DATA_W, USER_W);
+  localparam int AW_PAYLOAD_W = axi_pkg::aw_width(ADDR_W, ID_W, USER_W);
+  localparam int B_PAYLOAD_W = axi_pkg::b_width(ID_W, USER_W);
+  localparam int AR_PAYLOAD_W = axi_pkg::ar_width(ADDR_W, ID_W, USER_W);
+  localparam int R_PAYLOAD_W = axi_pkg::r_width(DATA_W, ID_W, USER_W);
   localparam int W_PAYLOAD_BIT_W =
     (W_PAYLOAD_W < 2) ? 1 : $clog2(W_PAYLOAD_W);
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   localparam bit MANAGER_IS_ENV = 1'b1;
 `else
   localparam bit MANAGER_IS_ENV = 1'b0;
 `endif
 
-  // PULP packed records are the common representation at the public boundary.
-  // Build each record in one procedural assignment.  Questa Formal can alias
-  // neighboring packed fields (for example ARVALID into the ARID MSB) when the
-  // record is driven by the macro's many continuous field assignments.  Role
-  // FVIPs consume these records as packed bits after the first modport hop.
-  always_comb begin
-    `AXI_SET_TO_REQ(view.req, axi)
-    `AXI_SET_TO_RESP(view.rsp, axi)
-  end
-
-  // Exact public live-channel view for role FVIPs.  Each payload is one
+  // Exact public live-channel view for role FVIPs. Each payload is one
   // vector and each handshake signal is a distinct scalar, so no packed
   // req/rsp field can be mistaken for its neighbor by the formal frontend.
   assign view.live_aw = {
@@ -95,7 +112,6 @@ module `MODNAME_AXI #(
   wire aw_hsk = axi.aw_valid && axi.aw_ready;
   wire w_hsk = axi.w_valid && axi.w_ready;
   wire b_hsk = axi.b_valid && axi.b_ready;
-  wire ar_hsk = axi.ar_valid && axi.ar_ready;
   wire r_hsk = axi.r_valid && axi.r_ready;
 
   // Reset is an external formal-harness contract, independent of AXI role.
@@ -131,7 +147,7 @@ module `MODNAME_AXI #(
   // avoid selecting a bad occurrence.  Constrain every environment-owned
   // txn with the matching deterministic bounded contract.
   generate if (ENABLE_TRANSACTION && ENABLE_ENV_TRANSACTION_CONTRACT) begin : g_env
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
     axi_fvip_manager_env_contract #(
       .ADDR_W(ADDR_W), .DATA_W(DATA_W),
       .MAX_OUTSTANDING(MAX_OUTSTANDING),
@@ -171,6 +187,14 @@ module `MODNAME_AXI #(
     // burst beat. Reuse the pair tracker's arbitrary beat choice.
     wire [WATCH_BEAT_W-1:0] rd_watch_beat =
       u_txn.i_aw_w_tracker.watch_beat;
+    logic [AR_PAYLOAD_W-1:0] rd_ar_snapshot;
+    logic [R_PAYLOAD_W-1:0] rd_r_snapshot;
+    logic rd_beat_sampled;
+    logic [AW_PAYLOAD_W-1:0] wr_aw_snapshot;
+    logic [B_PAYLOAD_W-1:0] wr_b_snapshot;
+    logic [AW_PAYLOAD_W-1:0] pair_aw_snapshot;
+    logic [W_PAYLOAD_W-1:0] pair_w_snapshot;
+    logic pair_beat_sampled;
     logic [DATA_W-1:0] wr_watch_data;
     logic [DATA_W/8-1:0] wr_watch_strb;
     logic wr_watch_last;
@@ -213,12 +237,15 @@ module `MODNAME_AXI #(
       view.rd_completed = u_txn.i_rd_tracker.completed;
       view.rd_rank = u_txn.i_rd_tracker.rank;
       view.rd_outstanding = u_txn.i_rd_tracker.outstanding;
+      view.rd_ar = rd_ar_snapshot;
       view.rd_beat_idx = rd_watch_beat;
       view.rd_rsp_beat = u_txn.i_rd_tracker.watched_beat;
+      view.rd_r = rd_r_snapshot;
+      view.rd_beat_sampled = rd_beat_sampled;
       view.rd_rsp_visible = u_txn.i_rd_tracker.rsp_visible;
       view.rd_rsp_complete =
         u_txn.i_rd_tracker.rsp_visible && r_hsk && axi.r_last;
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
       view.rd_rsp_wait_cycles = u_txn.i_rd_tracker.rsp_age;
 `else
       view.rd_rsp_wait_cycles = '0;
@@ -231,13 +258,15 @@ module `MODNAME_AXI #(
       view.wr_completed = u_txn.i_wr_b_tracker.completed;
       view.wr_rank = u_txn.i_wr_b_tracker.b_rank;
       view.wr_outstanding = u_txn.i_wr_b_tracker.outstanding;
+      view.wr_aw = wr_aw_snapshot;
       view.wr_data_pending = u_txn.i_wr_b_tracker.w_pending;
       view.wr_data_rank = u_txn.i_wr_b_tracker.w_rank;
       view.wr_data_complete = u_txn.i_wr_b_tracker.wr_data_complete;
+      view.wr_b = wr_b_snapshot;
       view.wr_rsp_visible = u_txn.i_wr_b_tracker.rsp_visible;
       view.wr_rsp_complete =
         u_txn.i_wr_b_tracker.rsp_visible && b_hsk;
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
       view.wr_rsp_wait_cycles = u_txn.i_wr_b_tracker.rsp_age;
 `else
       view.wr_rsp_wait_cycles = '0;
@@ -251,14 +280,17 @@ module `MODNAME_AXI #(
       view.pair_completed = u_txn.i_aw_w_tracker.completed;
       view.pair_rank = u_txn.i_aw_w_tracker.rank;
       view.pair_skew = u_txn.write_skew;
+      view.pair_aw = pair_aw_snapshot;
       view.wr_beat_idx = u_txn.i_aw_w_tracker.watch_beat;
+      view.wr_w = pair_w_snapshot;
+      view.wr_beat_sampled = pair_beat_sampled;
       view.pair_w_payload_idx = pair_w_payload_idx;
       view.pair_w_payload_bit = selected_w_payload_bit;
       view.pair_w_payload_available = selected_w_payload_valid;
       view.wr_data_visible = pair_w_live_owner && axi.w_valid;
       view.wr_data_burst_complete =
         pair_w_live_owner && w_hsk && axi.w_last;
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
       view.wr_data_wait_cycles = '0;
 `else
       view.wr_data_wait_cycles = u_txn.i_aw_w_tracker.wr_data_age;
@@ -267,14 +299,14 @@ module `MODNAME_AXI #(
 
     always_ff @(posedge clk or negedge rstn) begin
       if (!rstn) begin
-        view.rd_ar <= '0;
-        view.rd_r <= '0;
-        view.rd_beat_sampled <= 1'b0;
-        view.wr_aw <= '0;
-        view.wr_b <= '0;
-        view.pair_aw <= '0;
-        view.wr_w <= '0;
-        view.wr_beat_sampled <= 1'b0;
+        rd_ar_snapshot <= '0;
+        rd_r_snapshot <= '0;
+        rd_beat_sampled <= 1'b0;
+        wr_aw_snapshot <= '0;
+        wr_b_snapshot <= '0;
+        pair_aw_snapshot <= '0;
+        pair_w_snapshot <= '0;
+        pair_beat_sampled <= 1'b0;
         wr_watch_data <= '0;
         wr_watch_strb <= '0;
         wr_watch_last <= 1'b0;
@@ -284,19 +316,19 @@ module `MODNAME_AXI #(
         selected_w_payload_valid <= 1'b0;
       end else begin
         if (u_txn.i_rd_tracker.select_now) begin
-          view.rd_ar <= view.req.ar;
-          view.rd_beat_sampled <= 1'b0;
+          rd_ar_snapshot <= view.live_ar;
+          rd_beat_sampled <= 1'b0;
         end
         if (u_txn.i_rd_tracker.rsp_visible && r_hsk &&
             u_txn.i_rd_tracker.watched_beat == rd_watch_beat) begin
-          view.rd_r <= view.rsp.r;
-          view.rd_beat_sampled <= 1'b1;
+          rd_r_snapshot <= view.live_r;
+          rd_beat_sampled <= 1'b1;
         end
 
         if (u_txn.i_wr_b_tracker.select_now)
-          view.wr_aw <= view.req.aw;
+          wr_aw_snapshot <= view.live_aw;
         if (u_txn.i_wr_b_tracker.rsp_visible && b_hsk)
-          view.wr_b <= view.rsp.b;
+          wr_b_snapshot <= view.live_b;
 
         if (w_hsk && u_txn.i_aw_w_tracker.current_w_beat == u_txn.i_aw_w_tracker.watch_beat) begin
           wr_watch_data <= axi.w_data;
@@ -316,9 +348,9 @@ module `MODNAME_AXI #(
              u_txn.i_aw_w_tracker.skew == 0) ||
             (u_txn.i_aw_w_tracker.pending_w && aw_hsk &&
              u_txn.i_aw_w_tracker.rank == 0))
-          view.pair_aw <= view.req.aw;
+          pair_aw_snapshot <= view.live_aw;
         if (u_txn.i_aw_w_tracker.select_aw) begin
-          view.wr_beat_sampled <= 1'b0;
+          pair_beat_sampled <= 1'b0;
           selected_w_payload_valid <= 1'b0;
         end
 
@@ -330,11 +362,10 @@ module `MODNAME_AXI #(
             u_txn.i_aw_w_tracker.skew == 0 &&
             u_txn.i_aw_w_tracker.watch_beat <
               u_txn.i_aw_w_tracker.current_w_beat) begin
-          view.wr_w.data <= wr_watch_data;
-          view.wr_w.strb <= wr_watch_strb;
-          view.wr_w.last <= wr_watch_last;
-          view.wr_w.user <= wr_watch_user;
-          view.wr_beat_sampled <= 1'b1;
+          pair_w_snapshot <= {
+            wr_watch_data, wr_watch_strb, wr_watch_last, wr_watch_user
+          };
+          pair_beat_sampled <= 1'b1;
           selected_w_payload_bit <= rolling_w_payload_bit;
           selected_w_payload_valid <= 1'b1;
         end
@@ -345,25 +376,25 @@ module `MODNAME_AXI #(
         if (pair_w_live_owner && w_hsk &&
             u_txn.i_aw_w_tracker.current_w_beat ==
               u_txn.i_aw_w_tracker.watch_beat) begin
-          view.wr_w <= view.req.w;
-          view.wr_beat_sampled <= 1'b1;
+          pair_w_snapshot <= view.live_w;
+          pair_beat_sampled <= 1'b1;
           selected_w_payload_bit <= live_w_payload_bit;
           selected_w_payload_valid <= 1'b1;
         end
 
         if (pair_w_complete_now) begin
-          view.wr_beat_sampled <= u_txn.i_aw_w_tracker.watch_beat < u_txn.i_aw_w_tracker.current_w_beats;
+          pair_beat_sampled <= u_txn.i_aw_w_tracker.watch_beat <
+            u_txn.i_aw_w_tracker.current_w_beats;
           selected_w_payload_valid <=
             u_txn.i_aw_w_tracker.watch_beat <
               u_txn.i_aw_w_tracker.current_w_beats;
           if (u_txn.i_aw_w_tracker.current_w_beat == u_txn.i_aw_w_tracker.watch_beat) begin
-            view.wr_w <= view.req.w;
+            pair_w_snapshot <= view.live_w;
             selected_w_payload_bit <= live_w_payload_bit;
           end else begin
-            view.wr_w.data <= wr_watch_data;
-            view.wr_w.strb <= wr_watch_strb;
-            view.wr_w.last <= wr_watch_last;
-            view.wr_w.user <= wr_watch_user;
+            pair_w_snapshot <= {
+              wr_watch_data, wr_watch_strb, wr_watch_last, wr_watch_user
+            };
             selected_w_payload_bit <= rolling_w_payload_bit;
           end
         end
@@ -533,54 +564,23 @@ module `MODNAME_AXI #(
   end else begin : g_no_txn
     always_comb begin
       view.global_wr_outstanding = '0;
-      view.rd_select = 1'b0;
-      view.rd_watch_id = '0;
-      view.rd_selected = 1'b0;
-      view.rd_pending = 1'b0;
-      view.rd_completed = 1'b0;
-      view.rd_rank = '0;
-      view.rd_outstanding = '0;
-      view.rd_ar = '0;
-      view.rd_beat_idx = '0;
-      view.rd_rsp_beat = '0;
-      view.rd_r = '0;
-      view.rd_beat_sampled = 1'b0;
-      view.rd_rsp_visible = 1'b0;
-      view.rd_rsp_complete = 1'b0;
-      view.rd_rsp_wait_cycles = '0;
-      view.wr_select = 1'b0;
-      view.wr_watch_id = '0;
-      view.wr_selected = 1'b0;
-      view.wr_pending = 1'b0;
-      view.wr_completed = 1'b0;
-      view.wr_rank = '0;
-      view.wr_outstanding = '0;
-      view.wr_aw = '0;
-      view.wr_data_pending = 1'b0;
-      view.wr_data_rank = '0;
-      view.wr_data_complete = 1'b0;
-      view.wr_b = '0;
-      view.wr_rsp_visible = 1'b0;
-      view.wr_rsp_complete = 1'b0;
-      view.wr_rsp_wait_cycles = '0;
-      view.pair_select_aw = 1'b0;
-      view.pair_select_w = 1'b0;
-      view.pair_selected = 1'b0;
-      view.pair_pending_aw = 1'b0;
-      view.pair_pending_w = 1'b0;
-      view.pair_completed = 1'b0;
-      view.pair_rank = '0;
-      view.pair_skew = '0;
-      view.pair_aw = '0;
-      view.wr_beat_idx = '0;
-      view.wr_w = '0;
-      view.wr_beat_sampled = 1'b0;
-      view.pair_w_payload_idx = '0;
-      view.pair_w_payload_bit = 1'b0;
-      view.pair_w_payload_available = 1'b0;
-      view.wr_data_visible = 1'b0;
-      view.wr_data_burst_complete = 1'b0;
-      view.wr_data_wait_cycles = '0;
+      {view.rd_select, view.rd_watch_id, view.rd_selected, view.rd_pending,
+       view.rd_completed, view.rd_rank, view.rd_outstanding, view.rd_ar,
+       view.rd_beat_idx, view.rd_rsp_beat, view.rd_r, view.rd_beat_sampled,
+       view.rd_rsp_visible, view.rd_rsp_complete,
+       view.rd_rsp_wait_cycles} = '0;
+      {view.wr_select, view.wr_watch_id, view.wr_selected, view.wr_pending,
+       view.wr_completed, view.wr_rank, view.wr_outstanding, view.wr_aw,
+       view.wr_data_pending, view.wr_data_rank, view.wr_data_complete,
+       view.wr_b, view.wr_rsp_visible, view.wr_rsp_complete,
+       view.wr_rsp_wait_cycles} = '0;
+      {view.pair_select_aw, view.pair_select_w, view.pair_selected,
+       view.pair_pending_aw, view.pair_pending_w, view.pair_completed,
+       view.pair_rank, view.pair_skew, view.pair_aw, view.wr_beat_idx,
+       view.wr_w, view.wr_beat_sampled, view.pair_w_payload_idx,
+       view.pair_w_payload_bit, view.pair_w_payload_available,
+       view.wr_data_visible, view.wr_data_burst_complete,
+       view.wr_data_wait_cycles} = '0;
     end
   end endgenerate
 endmodule

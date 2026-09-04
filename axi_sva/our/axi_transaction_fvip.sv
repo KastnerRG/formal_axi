@@ -56,7 +56,7 @@ module `MODNAME_TXN #(
   s_watch_id_constant: assume property (@(posedge clk)
     disable iff ($isunknown(rstn)) $stable(watch_id));
 
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   // The external Manager must not offer a transfer for which its lifecycle
   // budget has no room.  Offer-level assumptions cannot suppress DUT-owned
   // READY and deliberately do not rely on a simultaneous DUT response.

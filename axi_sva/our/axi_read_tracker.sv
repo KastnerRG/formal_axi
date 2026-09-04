@@ -26,17 +26,15 @@ module `MODNAME_READ_TRACKER #(
   default disable iff (!rstn);
 
   localparam int COUNT_W = (MAX_OUTSTANDING < 2) ? 1 : $clog2(MAX_OUTSTANDING+1);
-  localparam int AGE_W = (MAX_RESPONSE_DELAY < 2) ?
-    1 : $clog2(MAX_RESPONSE_DELAY+1);
-  localparam int BEAT_COUNT_W =
-    (MAX_BURST_LEN < 1) ? 1 : $clog2(MAX_BURST_LEN + 1);
+  localparam int AGE_W = (MAX_RESPONSE_DELAY < 2) ? 1 : $clog2(MAX_RESPONSE_DELAY+1);
+  localparam int BEAT_COUNT_W = (MAX_BURST_LEN < 1) ? 1 : $clog2(MAX_BURST_LEN + 1);
 
   (* anyseq *) logic select_now;
   logic selected, pending, completed;
   logic [COUNT_W-1:0] outstanding, rank;
   logic [7:0] watched_len;
   logic [BEAT_COUNT_W-1:0] watched_beat;
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   // Only a DUT Subordinate owns R response availability.  At a DUT Manager
   // output the deterministic Subordinate environment contract supplies the
   // universal progress assumption, so a selector-local timer would be
@@ -48,18 +46,30 @@ module `MODNAME_READ_TRACKER #(
   wire r_watch = r_valid && r_id == watch_id;
   wire r_watch_hsk = r_hsk && r_id == watch_id;
   wire r_watch_last_hsk = r_watch_hsk && r_last;
+  // Invalid overflow/orphan events still fire their protocol properties, but
+  // cannot corrupt the shared observer.  In particular an orphan RLAST
+  // concurrent with the first AR must not consume that new request.
+  wire tracked_r_last = r_watch_last_hsk && outstanding != 0;
+  wire tracked_ar = ar_watch && (outstanding < MAX_OUTSTANDING || tracked_r_last);
   wire rsp_eligible = pending && rank == 0;
   wire rsp_visible = rsp_eligible && r_watch;
   wire r_stalled = r_valid && !r_hsk;
 
-  s_select_request: assume property (select_now |-> ar_watch && !selected);
+  fv_stream_occurrence_core #(.WIDTH(8), .MAX_PENDING(MAX_OUTSTANDING), .MAX_DELAY(MAX_RESPONSE_DELAY)) i_occurrence (
+    .clk(clk), .rstn(rstn), .select_now(select_now),
+    .s_hsk(tracked_ar), .s_data(ar_len), .m_hsk(tracked_r_last),
+    .selected(selected), .pending(pending), .completed(completed),
+    .watched_data(watched_len), .rank(rank), .occupancy(outstanding), .age()
+  );
+
+  s_select_request: assume property (select_now |-> tracked_ar && !selected);
   s_select_once: assume property (selected |-> !select_now);
 
   x_r_has_ar: `TXN_DEST property (r_watch |-> outstanding != 0);
   x_r_last_exact: `TXN_DEST property (pending && rank == 0 && r_watch |->
       r_last == (watched_beat == watched_len));
 
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   // The role reuses this Manager-input tracker state for its selected AR.
   // A pending request is one of the watched-ID requests represented by
   // outstanding, after every request ahead of it represented by rank.  This
@@ -69,7 +79,7 @@ module `MODNAME_READ_TRACKER #(
     pending |-> outstanding > rank);
 `endif
 
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   // MAX_RESPONSE_DELAY bounds each DUT-owned response beat once this request
   // is the per-ID head.  Once a selected beat is visible, MAX_STALL
   // separately bounds acceptance.
@@ -88,53 +98,22 @@ module `MODNAME_READ_TRACKER #(
 
   always_ff @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-      outstanding <= '0;
-      selected <= 1'b0;
-      pending <= 1'b0;
-      completed <= 1'b0;
-      rank <= '0;
-      watched_len <= '0;
       watched_beat <= '0;
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
       rsp_age <= '0;
 `endif
     end else begin
-      case ({ar_watch, r_watch_last_hsk})
-        2'b10: if (outstanding < MAX_OUTSTANDING)
-          outstanding <= outstanding + 1'b1;
-        2'b01: if (outstanding != 0)
-          outstanding <= outstanding - 1'b1;
-        2'b11: if (outstanding == 0)
-          outstanding <= 1;
-        default: outstanding <= outstanding;
-      endcase
-
       if (select_now) begin
-        selected <= 1'b1;
-        pending <= 1'b1;
-        watched_len <= ar_len;
         watched_beat <= '0;
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
         rsp_age <= '0;
 `endif
-        // A same-cycle RLAST belongs to an older request.  Remove it from the
-        // number of transactions ahead of the newly selected AR.
-        rank <= outstanding -
-          ((r_watch_last_hsk && outstanding != 0) ? 1'b1 : 1'b0);
-      end else if (pending && r_watch_hsk) begin
-        if (rank != 0) begin
-          if (r_last)
-            rank <= rank - 1'b1;
-        end else if (r_last) begin
-          pending <= 1'b0;
-          completed <= 1'b1;
-        end else begin
-          if (watched_beat < MAX_BURST_LEN)
-            watched_beat <= watched_beat + 1'b1;
-        end
+      end else if (pending && rank == 0 && r_watch_hsk && !r_last &&
+                   watched_beat < MAX_BURST_LEN) begin
+        watched_beat <= watched_beat + 1'b1;
       end
 
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
       if (ENABLE_RESPONSE_PROGRESS) begin
         if (!rsp_eligible || rsp_visible)
           rsp_age <= '0;

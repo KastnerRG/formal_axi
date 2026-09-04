@@ -11,11 +11,8 @@ module `MODNAME_PAIR_TRACKER #(
   parameter int MAX_BURST_LEN = 8,
   parameter bit ENABLE_WRITE_DATA_PROGRESS = 1'b0,
   parameter int MAX_WRITE_DATA_DELAY = 16,
-  localparam int SKEW_W =
-    $clog2(((MAX_A_AHEAD > MAX_B_AHEAD) ?
-      MAX_A_AHEAD : MAX_B_AHEAD) + 1) + 1,
-  localparam int BURST_COUNT_W = (MAX_BURST_LEN < 1) ?
-    1 : $clog2(MAX_BURST_LEN + 1)
+  localparam int SKEW_W = $clog2(((MAX_A_AHEAD > MAX_B_AHEAD) ? MAX_A_AHEAD : MAX_B_AHEAD) + 1) + 1,
+  localparam int BURST_COUNT_W = (MAX_BURST_LEN < 1) ? 1 : $clog2(MAX_BURST_LEN + 1)
 ) (
   input logic clk,
   input logic rstn,
@@ -39,18 +36,16 @@ module `MODNAME_PAIR_TRACKER #(
 
   localparam int STRB_W = DATA_W/8;
   localparam int WATCH_LANE_W = (STRB_W < 2) ? 1 : $clog2(STRB_W);
-  localparam int RANK_MAX = (MAX_A_AHEAD > MAX_B_AHEAD) ? MAX_A_AHEAD : MAX_B_AHEAD;
-  localparam int RANK_W = (RANK_MAX < 2) ? 1 : $clog2(RANK_MAX+1);
+  localparam int RANK_W = SKEW_W;
   localparam int WATCH_BEAT_W = (MAX_BURST_LEN < 2) ? 1 : $clog2(MAX_BURST_LEN);
-  localparam int AGE_W = (MAX_WRITE_DATA_DELAY < 2) ?
-    1 : $clog2(MAX_WRITE_DATA_DELAY+1);
+  localparam int AGE_W = (MAX_WRITE_DATA_DELAY < 2) ? 1 : $clog2(MAX_WRITE_DATA_DELAY+1);
 
   (* anyseq *) logic select_aw, select_w;
   (* anyconst *) logic [WATCH_BEAT_W-1:0] watch_beat;
   (* anyconst *) logic [WATCH_LANE_W-1:0] watch_lane;
   logic selected, pending_aw, pending_w, completed;
   logic [RANK_W-1:0] rank;
-`ifndef MASTER
+`ifndef AXI_FVIP_MANAGER
   // W availability is DUT-owned only on a DUT Manager output.  Manager-input
   // traffic is constrained universally by axi_fvip_manager_env_contract.
   logic [AGE_W-1:0] wr_data_age;
@@ -67,16 +62,23 @@ module `MODNAME_PAIR_TRACKER #(
 
   wire w_complete = w_hsk && w_last;
   wire [BURST_COUNT_W-1:0] current_w_beats = current_w_beat + 1'b1;
-  wire live_wstrb_lane = watch_lane < STRB_W ?
-    w_strb[watch_lane] : 1'b0;
-  wire completed_wstrb_lane = (current_w_beat == watch_beat) ?
-    live_wstrb_lane : sampled_wstrb_lane;
+  wire live_wstrb_lane = watch_lane < STRB_W ? w_strb[watch_lane] : 1'b0;
+  wire completed_wstrb_lane = current_w_beat == watch_beat ? live_wstrb_lane : sampled_wstrb_lane;
   wire [8:0] live_aw_beats = {1'b0, aw_len} + 9'd1;
   wire live_aw_lane_legal =
     wstrb_lane_valid(aw_addr, aw_size, aw_burst, aw_len,
                      watch_beat, watch_lane, 1'b1, DATA_W);
   wire wr_eligible = pending_aw && rank == 0;
   wire wr_visible = wr_eligible && w_valid;
+
+  fv_ordered_pair_core #(
+    .MAX_A_AHEAD(MAX_A_AHEAD), .MAX_B_AHEAD(MAX_B_AHEAD)
+  ) i_pair (
+    .clk(clk), .rstn(rstn), .select_a(select_aw), .select_b(select_w),
+    .a_hsk(aw_hsk), .b_hsk(w_complete), .selected(selected),
+    .pending_a(pending_aw), .pending_b(pending_w), .completed(completed),
+    .rank(rank), .balance(skew)
+  );
 
   // WSTRB legality forbids asserted bits outside the legal byte lanes; it
   // does not require every legal lane to be asserted.  The package's scalar
@@ -97,7 +99,7 @@ module `MODNAME_PAIR_TRACKER #(
   s_select_w_occurrence: assume property (select_w |-> w_complete && !selected && skew <= 0);
   s_select_once: assume property (selected |-> !select_aw && !select_w);
 
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   // These constrain only an external Manager.  MAX_A/B_AHEAD below are the
   // larger internal tracking capacities allowed on a DUT output.
   c_max_aw_ahead: assume property (
@@ -106,7 +108,7 @@ module `MODNAME_PAIR_TRACKER #(
     w_valid && w_last |-> skew > -CONFIG_MAX_B_AHEAD);
 `endif
 
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   x_a_ahead_bound: assume property (aw_valid |-> skew < MAX_A_AHEAD);
   x_b_ahead_bound: assume property (
     w_valid && w_last |-> skew > -MAX_B_AHEAD);
@@ -124,7 +126,7 @@ module `MODNAME_PAIR_TRACKER #(
   a_tracker_pending_w_rank: assert property (
     pending_w |-> skew < -$signed({1'b0, rank}));
 
-`ifndef MASTER
+`ifndef AXI_FVIP_MANAGER
   // An AW/W skew bound limits buffered bursts, but cannot force DUT-owned
   // WVALID.  Bound each required output beat once its AW is next in global W
   // order; earlier bursts have their own deadline.
@@ -142,7 +144,7 @@ module `MODNAME_PAIR_TRACKER #(
   // live lane directly.  Manager inputs retain selector-conditioned
   // assumptions here because the deterministic Manager contract separately
   // constrains every occurrence.
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   x_wstrb_live_after_aw: `TXN_SOURCE property (
       pending_aw && rank == 0 && w_valid && current_w_beat == watch_beat |->
         (live_wstrb_lane ? watched_aw_lane_legal : 1'b1));
@@ -168,7 +170,7 @@ module `MODNAME_PAIR_TRACKER #(
   // On DUT outputs, the position check remains active between W offers and
   // the count-parity case uses a live AW before AWREADY.  The retrospective
   // W-first cases remain necessary because their AW metadata arrives later.
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   x_w_last_offer_after_aw: `TXN_SOURCE property (
       pending_aw && rank == 0 && w_valid |->
         w_last == (current_w_beats == watched_aw_beats));
@@ -194,7 +196,7 @@ module `MODNAME_PAIR_TRACKER #(
   // one-cycle post-handshake form.  A DUT-output assertion instead compares
   // the saved W count with live AWLEN immediately, including while AWREADY is
   // low; the handshake capture bridge below remains an independent helper.
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   x_w_last_exact_after_w: `TXN_SOURCE property (
       pending_w && aw_hsk && rank == 0 |=>
         completed &&
@@ -205,7 +207,7 @@ module `MODNAME_PAIR_TRACKER #(
         watched_w_beats == {1'b0, aw_len} + 1'b1);
 `endif
 
-`ifndef MASTER
+`ifndef AXI_FVIP_MANAGER
   // Decompose the DUT-output W-before-AW check without adding observer
   // state.  A live late AW either handshakes now or is stalled.  The stalled
   // invariant is proved inductively from its entry and hold edges, so an
@@ -277,7 +279,7 @@ module `MODNAME_PAIR_TRACKER #(
       pending_aw && w_complete && rank == 0 &&
         watch_beat < current_w_beats |->
           (completed_wstrb_lane ? watched_aw_lane_legal : 1'b1));
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   x_wstrb_after_w: `TXN_SOURCE property (pending_w && aw_hsk && rank == 0 && watch_beat < watched_w_beats |->
         wstrb_lane_valid(aw_addr, aw_size, aw_burst, aw_len, watch_beat,
                          watch_lane, sampled_wstrb_lane, DATA_W));
@@ -313,7 +315,7 @@ module `MODNAME_PAIR_TRACKER #(
           sampled_wstrb_lane == $past(live_wstrb_lane));
   a_tracker_wstrb_lane_frozen: assert property (
       pending_w || completed |=> $stable(sampled_wstrb_lane));
-`ifndef MASTER
+`ifndef AXI_FVIP_MANAGER
   // Only the DUT-output late-AW proof consumes this bridge.  Do not elaborate
   // duplicate input-side helper checkers for the environment polarity.
   a_tracker_w_beats_capture_select_w: assert property (
@@ -362,31 +364,14 @@ module `MODNAME_PAIR_TRACKER #(
 
   always_ff @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-      skew <= '0;
-      selected <= 1'b0;
-      pending_aw <= 1'b0;
-      pending_w <= 1'b0;
-      completed <= 1'b0;
-      rank <= '0;
       watched_aw_beats <= '0;
       watched_aw_lane_legal <= 1'b0;
       watched_w_beats <= '0;
       sampled_wstrb_lane <= 1'b0;
-`ifndef MASTER
+`ifndef AXI_FVIP_MANAGER
       wr_data_age <= '0;
 `endif
     end else begin
-      case ({aw_hsk, w_complete})
-        // The bound assertions fire on the handshake that exceeds the
-        // configured profile, before this observer update.  Keep the legal
-        // transition relation minimal; dependent bookkeeping lemmas are
-        // composed with the corresponding bound rather than relying on
-        // post-violation observer state.
-        2'b10: skew <= skew + 1;
-        2'b01: skew <= skew - 1;
-        default: skew <= skew;
-      endcase
-
       // Before selection this rolls with the current burst.  An AW-first
       // selection keeps it rolling through older W bursts; a W-first
       // selection freezes immediately so later W traffic cannot overwrite
@@ -395,51 +380,29 @@ module `MODNAME_PAIR_TRACKER #(
           current_w_beat == watch_beat)
         sampled_wstrb_lane <= live_wstrb_lane;
       if (select_aw) begin
-        selected <= 1'b1;
         watched_aw_beats <= live_aw_beats;
         watched_aw_lane_legal <= live_aw_lane_legal;
-`ifndef MASTER
+`ifndef AXI_FVIP_MANAGER
         wr_data_age <= '0;
 `endif
         if (w_complete && skew == 0) begin
           watched_w_beats <= current_w_beats;
-          completed <= 1'b1;
-        end else begin
-          pending_aw <= 1'b1;
-          rank <= skew - (w_complete ? 1'b1 : 1'b0);
         end
       end else if (select_w) begin
-        selected <= 1'b1;
         watched_w_beats <= current_w_beats;
         if (aw_hsk && skew == 0) begin
           watched_aw_beats <= live_aw_beats;
           watched_aw_lane_legal <= live_aw_lane_legal;
-          completed <= 1'b1;
-        end else begin
-          pending_w <= 1'b1;
-          rank <= -skew - (aw_hsk ? 1'b1 : 1'b0);
         end
-      end else if (pending_aw && w_complete) begin
-        if (rank == 0) begin
-          watched_w_beats <= current_w_beats;
-          pending_aw <= 1'b0;
-          completed <= 1'b1;
-        end else begin
-          rank <= rank - 1'b1;
-        end
-      end else if (pending_w && aw_hsk) begin
-        if (rank == 0) begin
-          watched_aw_beats <= live_aw_beats;
-          watched_aw_lane_legal <= live_aw_lane_legal;
-          pending_w <= 1'b0;
-          completed <= 1'b1;
-        end else begin
-          rank <= rank - 1'b1;
-        end
+      end else if (pending_aw && rank == 0 && w_complete) begin
+        watched_w_beats <= current_w_beats;
+      end else if (pending_w && rank == 0 && aw_hsk) begin
+        watched_aw_beats <= live_aw_beats;
+        watched_aw_lane_legal <= live_aw_lane_legal;
       end
 
 
-`ifndef MASTER
+`ifndef AXI_FVIP_MANAGER
       if (ENABLE_WRITE_DATA_PROGRESS) begin
         if (!wr_eligible || wr_visible)
           wr_data_age <= '0;

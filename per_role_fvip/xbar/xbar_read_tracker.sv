@@ -13,10 +13,8 @@ module fv_xbar_read_tracker #(
   parameter int USER_W = 1,
   parameter int MAX_OUTSTANDING = 4,
   parameter int MAX_OUTPUT_OUTSTANDING = MAX_OUTSTANDING,
-  parameter int MAX_AW_AHEAD = 4,
-  parameter int MAX_W_AHEAD = 4,
-  parameter int MAX_OUTPUT_AW_AHEAD = MAX_AW_AHEAD,
-  parameter int MAX_OUTPUT_W_AHEAD = MAX_W_AHEAD,
+  parameter int MAX_OUTPUT_AW_AHEAD = 4,
+  parameter int MAX_OUTPUT_W_AHEAD = 4,
   parameter int MAX_BURST_LEN = 8,
   parameter bit ENABLE_PROGRESS = 1'b0,
   parameter int MAX_DELAY = 32,
@@ -29,19 +27,6 @@ module fv_xbar_read_tracker #(
   parameter logic [DATA_W-1:0] ERROR_RDATA = DATA_W'(64'hca11_ab1e_bad_cab1e),
   parameter int PAYLOAD_BIT_W = 1,
   localparam int WATCH_W = (MAX_BURST_LEN < 2) ? 1 : $clog2(MAX_BURST_LEN),
-  localparam int IN_AW_W = IN_ID_W + ADDR_W + 35 + USER_W,
-  localparam int IN_W_W = DATA_W + DATA_W/8 + 1 + USER_W,
-  localparam int IN_AR_W = IN_ID_W + ADDR_W + 29 + USER_W,
-  localparam int IN_B_W = IN_ID_W + 2 + USER_W,
-  localparam int IN_R_W = IN_ID_W + DATA_W + 3 + USER_W,
-  localparam int IN_REQ_W = IN_AW_W + IN_W_W + IN_AR_W + 5,
-  localparam int IN_RSP_W = IN_B_W + IN_R_W + 5,
-  localparam int OUT_REQ_W = IN_REQ_W + 2*(OUT_ID_W-IN_ID_W),
-  localparam int OUT_RSP_W = IN_RSP_W + 2*(OUT_ID_W-IN_ID_W),
-  localparam int IN_STATE_MAX =
-    MAX_OUTSTANDING + MAX_AW_AHEAD + MAX_W_AHEAD,
-  localparam int IN_STATE_W =
-    (IN_STATE_MAX < 2) ? 1 : $clog2(IN_STATE_MAX + 1),
   localparam int OUT_STATE_MAX =
     MAX_OUTPUT_OUTSTANDING + MAX_OUTPUT_AW_AHEAD + MAX_OUTPUT_W_AHEAD,
   localparam int OUT_STATE_W =
@@ -52,24 +37,14 @@ module fv_xbar_read_tracker #(
   input logic enable,
   input logic source,
   input logic [1:0] watch_route,
-  input logic [IN_ID_W-1:0] watch_id,
-  input logic [WATCH_W-1:0] watch_beat,
   input logic [PAYLOAD_BIT_W-1:0] watch_payload_bit,
   input logic role_selected,
-  input logic s_protocol_pending,
-  input logic s_protocol_completed,
-  input logic [IN_STATE_W-1:0] s_protocol_rank,
-  input logic [7:0] s_protocol_beat,
-  input logic s_protocol_rsp_visible,
-  input logic [OUT_STATE_W-1:0] m_protocol_outstanding,
   input logic select_now,
   input logic route_hsk,
-  input logic [IN_REQ_W-1:0] s_req_bits,
-  input logic [IN_RSP_W-1:0] s_rsp_bits,
-  input logic [OUT_REQ_W-1:0] m0_req_bits,
-  input logic [OUT_RSP_W-1:0] m0_rsp_bits,
-  input logic [OUT_REQ_W-1:0] m1_req_bits,
-  input logic [OUT_RSP_W-1:0] m1_rsp_bits
+  axi_fvip_txn_view_if.Consumer s0_view,
+  axi_fvip_txn_view_if.Consumer s1_view,
+  axi_fvip_txn_view_if.Consumer m0_view,
+  axi_fvip_txn_view_if.Consumer m1_view
 );
   default clocking cb @(posedge clk); endclocking
   default disable iff (!rstn);
@@ -80,28 +55,46 @@ module fv_xbar_read_tracker #(
   localparam int AGE_W = (MAX_DELAY < 2) ? 1 : $clog2(MAX_DELAY + 1);
   localparam int BEAT_COUNT_W =
     (MAX_BURST_LEN < 1) ? 1 : $clog2(MAX_BURST_LEN + 1);
-  localparam int R_CANON_W = IN_ID_W + DATA_W + 2 + 1 + USER_W;
+  localparam int R_CANON_W = axi_pkg::r_width(DATA_W, IN_ID_W, USER_W);
 
   typedef logic [ADDR_W-1:0] addr_t;
   typedef logic [DATA_W-1:0] data_t;
-  typedef logic [DATA_W/8-1:0] strb_t;
   typedef logic [USER_W-1:0] user_t;
   typedef logic [IN_ID_W-1:0] in_id_t;
   typedef logic [OUT_ID_W-1:0] out_id_t;
-  `AXI_TYPEDEF_ALL_CT(in_axi, in_req_t, in_rsp_t,
-    addr_t, in_id_t, data_t, strb_t, user_t)
-  `AXI_TYPEDEF_ALL_CT(out_axi, out_req_t, out_rsp_t,
-    addr_t, out_id_t, data_t, strb_t, user_t)
-  in_req_t s_req;
-  in_rsp_t s_rsp;
-  out_req_t m0_req, m1_req;
-  out_rsp_t m0_rsp, m1_rsp;
-  assign s_req = s_req_bits;
-  assign s_rsp = s_rsp_bits;
-  assign m0_req = m0_req_bits;
-  assign m0_rsp = m0_rsp_bits;
-  assign m1_req = m1_req_bits;
-  assign m1_rsp = m1_rsp_bits;
+  `AXI_TYPEDEF_AR_CHAN_T(in_ar_t, addr_t, in_id_t, user_t)
+  `AXI_TYPEDEF_R_CHAN_T(in_r_t, data_t, in_id_t, user_t)
+  `AXI_TYPEDEF_R_CHAN_T(out_r_t, data_t, out_id_t, user_t)
+
+  in_ar_t s_ar;
+  in_r_t s_r;
+  out_r_t m0_r, m1_r;
+  assign s_ar = source ? s1_view.live_ar : s0_view.live_ar;
+  assign s_r = source ? s1_view.live_r : s0_view.live_r;
+  assign m0_r = m0_view.live_r;
+  assign m1_r = m1_view.live_r;
+  wire s_r_ready = source ? s1_view.live_r_ready : s0_view.live_r_ready;
+  wire m0_r_valid = m0_view.live_r_valid;
+  wire m0_r_ready = m0_view.live_r_ready;
+  wire m1_r_valid = m1_view.live_r_valid;
+  wire m1_r_ready = m1_view.live_r_ready;
+
+  wire [IN_ID_W-1:0] watch_id =
+    source ? s1_view.rd_watch_id : s0_view.rd_watch_id;
+  wire [7:0] selected_s_watch_beat =
+    source ? s1_view.rd_beat_idx : s0_view.rd_beat_idx;
+  wire [WATCH_W-1:0] watch_beat =
+    selected_s_watch_beat[WATCH_W-1:0];
+  wire s_protocol_pending =
+    source ? s1_view.rd_pending : s0_view.rd_pending;
+  wire s_protocol_completed =
+    source ? s1_view.rd_completed : s0_view.rd_completed;
+  wire [7:0] s_protocol_beat =
+    source ? s1_view.rd_rsp_beat : s0_view.rd_rsp_beat;
+  wire s_protocol_rsp_visible =
+    source ? s1_view.rd_rsp_visible : s0_view.rd_rsp_visible;
+  wire [OUT_STATE_W-1:0] m_protocol_outstanding =
+    watch_route == 1 ? m1_view.rd_outstanding : m0_view.rd_outstanding;
 
   function automatic logic [1:0] decode(input logic [ADDR_W-1:0] addr);
     if ((addr & ADDR_MASK) == ADDR0_BASE)
@@ -114,7 +107,7 @@ module fv_xbar_read_tracker #(
       decode = DEST_ERROR;
   endfunction
 
-  wire [1:0] s_route = decode(s_req.ar.addr);
+  wire [1:0] s_route = decode(s_ar.addr);
 
   wire [1:0] m_r_offer;
   wire [1:0] m_r_last_offer;
@@ -122,29 +115,37 @@ module fv_xbar_read_tracker #(
   wire [1:0] m_r_last_watch;
   wire [R_CANON_W-1:0] m_r_data [2];
   assign m_r_offer[0] =
-    enable && m0_rsp.r_valid &&
-    m0_rsp.r.id[OUT_ID_W-1] == source &&
-    m0_rsp.r.id[IN_ID_W-1:0] == watch_id;
+    enable && m0_r_valid &&
+    m0_r.id[OUT_ID_W-1] == source &&
+    m0_r.id[IN_ID_W-1:0] == watch_id;
   assign m_r_offer[1] =
-    enable && m1_rsp.r_valid &&
-    m1_rsp.r.id[OUT_ID_W-1] == source &&
-    m1_rsp.r.id[IN_ID_W-1:0] == watch_id;
-  assign m_r_watch[0] = m_r_offer[0] && m0_req.r_ready;
-  assign m_r_watch[1] = m_r_offer[1] && m1_req.r_ready;
-  assign m_r_last_offer[0] = m_r_offer[0] && m0_rsp.r.last;
-  assign m_r_last_offer[1] = m_r_offer[1] && m1_rsp.r.last;
-  assign m_r_last_watch[0] = m_r_watch[0] && m0_rsp.r.last;
-  assign m_r_last_watch[1] = m_r_watch[1] && m1_rsp.r.last;
+    enable && m1_r_valid &&
+    m1_r.id[OUT_ID_W-1] == source &&
+    m1_r.id[IN_ID_W-1:0] == watch_id;
+  assign m_r_watch[0] = m_r_offer[0] && m0_r_ready;
+  assign m_r_watch[1] = m_r_offer[1] && m1_r_ready;
+  assign m_r_last_offer[0] = m_r_offer[0] && m0_r.last;
+  assign m_r_last_offer[1] = m_r_offer[1] && m1_r.last;
+  assign m_r_last_watch[0] = m_r_watch[0] && m0_r.last;
+  assign m_r_last_watch[1] = m_r_watch[1] && m1_r.last;
   assign m_r_data[0] = {
-    m0_rsp.r.id[IN_ID_W-1:0], m0_rsp.r.data,
-    m0_rsp.r.resp, m0_rsp.r.last,
-    (PRESERVE_USER ? m0_rsp.r.user : '0)
+    m0_r.id[IN_ID_W-1:0], m0_r.data,
+    m0_r.resp, m0_r.last,
+    (PRESERVE_USER ? m0_r.user : '0)
   };
   assign m_r_data[1] = {
-    m1_rsp.r.id[IN_ID_W-1:0], m1_rsp.r.data,
-    m1_rsp.r.resp, m1_rsp.r.last,
-    (PRESERVE_USER ? m1_rsp.r.user : '0)
+    m1_r.id[IN_ID_W-1:0], m1_r.data,
+    m1_r.resp, m1_r.last,
+    (PRESERVE_USER ? m1_r.user : '0)
   };
+  wire selected_m_r_offer = watch_route == 0 ? m_r_offer[0] :
+    watch_route == 1 ? m_r_offer[1] : 1'b0;
+  wire selected_m_r_last_offer = watch_route == 0 ? m_r_last_offer[0] :
+    watch_route == 1 ? m_r_last_offer[1] : 1'b0;
+  wire selected_m_r_watch = watch_route == 0 ? m_r_watch[0] :
+    watch_route == 1 ? m_r_watch[1] : 1'b0;
+  wire selected_m_r_last_watch = watch_route == 0 ? m_r_last_watch[0] :
+    watch_route == 1 ? m_r_last_watch[1] : 1'b0;
 
   logic routed;
 
@@ -162,9 +163,9 @@ module fv_xbar_read_tracker #(
   wire m_rsp_has_credit = m_protocol_outstanding > m_rsp_rank;
   wire selected_m_r =
     routed && watch_route != DEST_ERROR && m_rsp_pending &&
-    m_rsp_rank == 0 && m_rsp_has_credit && m_r_offer[watch_route];
+    m_rsp_rank == 0 && m_rsp_has_credit && selected_m_r_offer;
   wire selected_m_r_last_now =
-    selected_m_r && m_r_last_offer[watch_route];
+    selected_m_r && selected_m_r_last_offer;
   wire selected_m_beat =
     selected_m_r && m_rsp_beat == watch_beat;
   wire [R_CANON_W-1:0] current_m_r_data =
@@ -174,8 +175,8 @@ module fv_xbar_read_tracker #(
     s_protocol_beat == watch_beat;
   wire [1:0] effective_dest = watch_route;
   wire [R_CANON_W-1:0] current_s_r_data = {
-    s_rsp.r.id, s_rsp.r.data, s_rsp.r.resp,
-    s_rsp.r.last, (PRESERVE_USER ? s_rsp.r.user : '0)
+    s_r.id, s_r.data, s_r.resp,
+    s_r.last, (PRESERVE_USER ? s_r.user : '0)
   };
   wire current_m_r_data_bit = watch_payload_bit < R_CANON_W ?
     current_m_r_data[watch_payload_bit] : 1'b0;
@@ -198,12 +199,12 @@ module fv_xbar_read_tracker #(
         selected_m_beat &&
           current_s_r_data_bit == current_m_r_data_bit));
   a_selected_mapped_response_completion: assert property (
-    selected_s_r && s_rsp.r.last && effective_dest != DEST_ERROR |->
+    selected_s_r && s_r.last && effective_dest != DEST_ERROR |->
       m_rsp_completed || selected_m_r_last_now);
   a_selected_error_response: assert property (
     selected_s_r && effective_dest == DEST_ERROR |->
-      s_rsp.r.resp == axi_pkg::RESP_DECERR &&
-      s_rsp.r.data == ERROR_RDATA);
+      s_r.resp == axi_pkg::RESP_DECERR &&
+      s_r.data == ERROR_RDATA);
 
   if (ENABLE_PROGRESS) begin : g_progress
     a_selected_progress: assert property (
@@ -216,12 +217,12 @@ module fv_xbar_read_tracker #(
   c_complete: cover property (role_selected && s_protocol_completed);
   c_mapped_r_offer_stalled_live: cover property (
     selected_s_beat && effective_dest != DEST_ERROR &&
-    !s_req.r_ready && selected_m_beat);
+    !s_r_ready && selected_m_beat);
   c_mapped_r_offer_stalled_sampled: cover property (
     selected_s_beat && effective_dest != DEST_ERROR &&
-    !s_req.r_ready && m_beat_sampled);
+    !s_r_ready && m_beat_sampled);
   c_error_r_offer_stalled: cover property (
-    selected_s_r && effective_dest == DEST_ERROR && !s_req.r_ready);
+    selected_s_r && effective_dest == DEST_ERROR && !s_r_ready);
 
   always_ff @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -242,22 +243,22 @@ module fv_xbar_read_tracker #(
         routed <= 1'b1;
         m_rsp_pending <= 1'b1;
         m_rsp_rank <= m_protocol_outstanding -
-          ((m_r_last_watch[watch_route] &&
+          ((selected_m_r_last_watch &&
             m_protocol_outstanding != 0) ? 1'b1 : 1'b0);
         m_rsp_beat <= '0;
       end
 
       if (!route_hsk && m_rsp_pending && m_rsp_has_credit &&
-          m_r_watch[watch_route]) begin
+          selected_m_r_watch) begin
         if (m_rsp_rank != 0) begin
-          if (m_r_last_watch[watch_route])
+          if (selected_m_r_last_watch)
             m_rsp_rank <= m_rsp_rank - 1'b1;
         end else begin
           if (m_rsp_beat == watch_beat) begin
             m_beat_sampled <= 1'b1;
             m_beat_data <= current_m_r_data_bit;
           end
-          if (m_r_last_watch[watch_route]) begin
+          if (selected_m_r_last_watch) begin
             m_rsp_pending <= 1'b0;
             m_rsp_completed <= 1'b1;
           end else begin

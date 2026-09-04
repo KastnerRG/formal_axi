@@ -149,11 +149,11 @@ module tb_c6_public_pair_view_refinement (
     axi.r_ready = 1'b0;
   end
 
-  // No MASTER define is present in this source list, so this is the
+  // No AXI_FVIP_MANAGER define is present in this source list, so this is the
   // DUT-output-polarity endpoint: Manager behavior is asserted, never
   // assumed.  In particular, no assumption below this instance constrains
   // AWVALID, WVALID, either payload, AWLEN, or either READY signal.
-  s_axi_fvip #(
+  subordinate_axi_fvip #(
     .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W),
     .MAX_STALL(2),
     .ENABLE_MAX_STALL(1'b0),

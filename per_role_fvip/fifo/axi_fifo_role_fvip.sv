@@ -11,16 +11,16 @@ module fv_axi_fifo_role_fvip #(
   axi_fvip_txn_view_if.Consumer s_view,
   axi_fvip_txn_view_if.Consumer m_view
 );
-  wire s_aw_hsk = s_view.req.aw_valid && s_view.rsp.aw_ready;
-  wire m_aw_hsk = m_view.req.aw_valid && m_view.rsp.aw_ready;
-  wire s_w_hsk  = s_view.req.w_valid  && s_view.rsp.w_ready;
-  wire m_w_hsk  = m_view.req.w_valid  && m_view.rsp.w_ready;
-  wire m_b_hsk  = m_view.rsp.b_valid && m_view.req.b_ready;
-  wire s_b_hsk  = s_view.rsp.b_valid && s_view.req.b_ready;
-  wire s_ar_hsk = s_view.req.ar_valid && s_view.rsp.ar_ready;
-  wire m_ar_hsk = m_view.req.ar_valid && m_view.rsp.ar_ready;
-  wire m_r_hsk  = m_view.rsp.r_valid && m_view.req.r_ready;
-  wire s_r_hsk  = s_view.rsp.r_valid && s_view.req.r_ready;
+  wire s_aw_hsk = s_view.live_aw_valid && s_view.live_aw_ready;
+  wire m_aw_hsk = m_view.live_aw_valid && m_view.live_aw_ready;
+  wire s_w_hsk  = s_view.live_w_valid  && s_view.live_w_ready;
+  wire m_w_hsk  = m_view.live_w_valid  && m_view.live_w_ready;
+  wire m_b_hsk  = m_view.live_b_valid  && m_view.live_b_ready;
+  wire s_b_hsk  = s_view.live_b_valid  && s_view.live_b_ready;
+  wire s_ar_hsk = s_view.live_ar_valid && s_view.live_ar_ready;
+  wire m_ar_hsk = m_view.live_ar_valid && m_view.live_ar_ready;
+  wire m_r_hsk  = m_view.live_r_valid  && m_view.live_r_ready;
+  wire s_r_hsk  = s_view.live_r_valid  && s_view.live_r_ready;
 
 `define FIFO_ROLE_CHECK(CH, SIN, SHSK, MOUT, MHSK) \
   begin : g_``CH``_conservation \
@@ -37,12 +37,11 @@ module fv_axi_fifo_role_fvip #(
   // Each tracker proves forward appearance/order/payload with one selected
   // occurrence and inverse conservation with continuous occupancy.
   generate
-    `FIFO_ROLE_CHECK(aw, s_view.req.aw,  s_aw_hsk, m_view.req.aw,  m_aw_hsk)
-    `FIFO_ROLE_CHECK(w,  s_view.req.w,   s_w_hsk,  m_view.req.w,   m_w_hsk)
-    `FIFO_ROLE_CHECK(b,  m_view.rsp.b,   m_b_hsk,  s_view.rsp.b,   s_b_hsk)
-    `FIFO_ROLE_CHECK(ar, s_view.req.ar,  s_ar_hsk, m_view.req.ar,  m_ar_hsk)
-    `FIFO_ROLE_CHECK(r,  m_view.rsp.r,   m_r_hsk,  s_view.rsp.r,   s_r_hsk)
+    `FIFO_ROLE_CHECK(aw, s_view.live_aw, s_aw_hsk, m_view.live_aw, m_aw_hsk)
+    `FIFO_ROLE_CHECK(w,  s_view.live_w,  s_w_hsk,  m_view.live_w,  m_w_hsk)
+    `FIFO_ROLE_CHECK(b,  m_view.live_b,  m_b_hsk,  s_view.live_b,  s_b_hsk)
+    `FIFO_ROLE_CHECK(ar, s_view.live_ar, s_ar_hsk, m_view.live_ar, m_ar_hsk)
+    `FIFO_ROLE_CHECK(r,  m_view.live_r,  m_r_hsk,  s_view.live_r,  s_r_hsk)
   endgenerate
 `undef FIFO_ROLE_CHECK
 endmodule
-

@@ -100,7 +100,7 @@ module fv_axi_transaction_oracle #(
   wire join_write = awq_count != 0 && wq_count != 0;
   wire w_complete = w_hsk && w_last;
 
-`ifdef MASTER
+`ifdef AXI_FVIP_MANAGER
   // Configuration assumptions apply to the external Manager only.  They are
   // not promoted to AXI guarantees on a checked DUT output.
   c_max_aw_ahead: assume property (@(posedge clk) disable iff (!rstn)

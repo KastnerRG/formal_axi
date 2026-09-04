@@ -130,7 +130,7 @@ module tb_link_mutation(input logic clk, input logic rstn);
     subordinate_axi.r_ready = 1'b1;
   end
 
-  s_axi_fvip #(
+  subordinate_axi_fvip #(
     .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W),
     .MAX_STALL(1), .ENABLE_MAX_STALL(1'b1),
     .ENABLE_TRANSACTION(1'b0)
@@ -138,7 +138,7 @@ module tb_link_mutation(input logic clk, input logic rstn);
     .clk(clk), .rstn(rstn), .axi(manager_axi), .view(manager_view)
   );
 
-  m_axi_fvip #(
+  manager_axi_fvip #(
     .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .USER_W(USER_W),
     .MAX_STALL(1), .ENABLE_MAX_STALL(1'b1),
     .ENABLE_TRANSACTION(1'b0)

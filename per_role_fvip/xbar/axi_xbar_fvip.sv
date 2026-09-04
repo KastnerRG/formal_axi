@@ -1,3 +1,60 @@
+// Keep the aggregate declarative: all four endpoints use one of these two
+// configurations.  Macro expansion deliberately preserves the historical
+// endpoint instance names consumed by focused formal targets.
+`define XBAR_INPUT_VIEW(NAME) \
+  axi_fvip_txn_view_if #( \
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(IN_ID_W), .USER_W(USER_W), \
+    .MAX_OUTSTANDING(MAX_OUTSTANDING), \
+    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD), \
+    .MAX_BURST_LEN(MAX_BURST_LEN), \
+    .MAX_RESPONSE_DELAY(MAX_INPUT_RESPONSE_DELAY), \
+    .MAX_WRITE_DATA_DELAY(MAX_WRITE_DATA_DELAY) \
+  ) NAME ();
+
+`define XBAR_OUTPUT_VIEW(NAME) \
+  axi_fvip_txn_view_if #( \
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(OUT_ID_W), .USER_W(USER_W), \
+    .MAX_OUTSTANDING(MAX_OUTPUT_OUTSTANDING), \
+    .MAX_AW_AHEAD(MAX_OUTPUT_AW_AHEAD), \
+    .MAX_W_AHEAD(MAX_OUTPUT_W_AHEAD), \
+    .MAX_BURST_LEN(MAX_BURST_LEN), \
+    .MAX_RESPONSE_DELAY(MAX_RESPONSE_DELAY), \
+    .MAX_WRITE_DATA_DELAY(MAX_OUTPUT_WRITE_DATA_DELAY) \
+  ) NAME ();
+
+`define XBAR_INPUT_ENDPOINT(NAME, BUS, VIEW) \
+  manager_axi_fvip #( \
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(IN_ID_W), .USER_W(USER_W), \
+    .MAX_STALL(MAX_STALL), .ENABLE_MAX_STALL(1'b0), \
+    .ENABLE_REQUEST_MAX_STALL(ENABLE_INPUT_MAX_STALL), \
+    .ENABLE_RESPONSE_MAX_STALL(ENABLE_MAX_STALL), \
+    .MAX_OUTSTANDING(MAX_OUTSTANDING), \
+    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD), \
+    .ENABLE_EXCLUSIVE(1'b0), .ENABLE_ATOP(1'b0), \
+    .MAX_BURST_LEN(MAX_BURST_LEN), .ENABLE_TRANSACTION(ENABLE_TRANSACTION), \
+    .ENABLE_RESPONSE_PROGRESS(ENABLE_RESPONSE_PROGRESS), \
+    .MAX_RESPONSE_DELAY(MAX_INPUT_RESPONSE_DELAY), \
+    .ENABLE_WRITE_DATA_PROGRESS(ENABLE_WRITE_DATA_PROGRESS), \
+    .MAX_WRITE_DATA_DELAY(MAX_WRITE_DATA_DELAY) \
+  ) NAME (.clk(clk), .rstn(rstn), .axi(BUS), .view(VIEW));
+
+`define XBAR_OUTPUT_ENDPOINT(NAME, BUS, VIEW) \
+  subordinate_axi_fvip #( \
+    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(OUT_ID_W), .USER_W(USER_W), \
+    .MAX_STALL(MAX_STALL), .ENABLE_MAX_STALL(1'b0), \
+    .ENABLE_REQUEST_MAX_STALL(ENABLE_MAX_STALL), \
+    .ENABLE_RESPONSE_MAX_STALL(ENABLE_INPUT_MAX_STALL), \
+    .MAX_OUTSTANDING(MAX_OUTPUT_OUTSTANDING), \
+    .MAX_AW_AHEAD(MAX_OUTPUT_AW_AHEAD), \
+    .MAX_W_AHEAD(MAX_OUTPUT_W_AHEAD), \
+    .ENABLE_EXCLUSIVE(1'b0), .ENABLE_ATOP(1'b0), \
+    .MAX_BURST_LEN(MAX_BURST_LEN), .ENABLE_TRANSACTION(ENABLE_TRANSACTION), \
+    .ENABLE_RESPONSE_PROGRESS(ENABLE_RESPONSE_PROGRESS), \
+    .MAX_RESPONSE_DELAY(MAX_RESPONSE_DELAY), \
+    .ENABLE_WRITE_DATA_PROGRESS(ENABLE_WRITE_DATA_PROGRESS), \
+    .MAX_WRITE_DATA_DELAY(MAX_OUTPUT_WRITE_DATA_DELAY) \
+  ) NAME (.clk(clk), .rstn(rstn), .axi(BUS), .view(VIEW));
+
 // 2x2 crossbar aggregate.  Endpoint protocol checking is complete and usable
 // with ENABLE_ROLE=0; the optional role checker consumes only the four public
 // transaction views and contains every crossbar-specific obligation.
@@ -90,41 +147,10 @@ module fv_axi_xbar_fvip #(
   localparam int GLOBAL_WR_SUM_W =
     (2 * GLOBAL_WR_MAX < 2) ? 1 : $clog2(2 * GLOBAL_WR_MAX + 1);
 
-  axi_fvip_txn_view_if #(
-    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(IN_ID_W), .USER_W(USER_W),
-    .MAX_OUTSTANDING(MAX_OUTSTANDING),
-    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD),
-    .MAX_BURST_LEN(MAX_BURST_LEN),
-    .MAX_RESPONSE_DELAY(MAX_INPUT_RESPONSE_DELAY),
-    .MAX_WRITE_DATA_DELAY(MAX_WRITE_DATA_DELAY)
-  ) s0_view ();
-  axi_fvip_txn_view_if #(
-    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(IN_ID_W), .USER_W(USER_W),
-    .MAX_OUTSTANDING(MAX_OUTSTANDING),
-    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD),
-    .MAX_BURST_LEN(MAX_BURST_LEN),
-    .MAX_RESPONSE_DELAY(MAX_INPUT_RESPONSE_DELAY),
-    .MAX_WRITE_DATA_DELAY(MAX_WRITE_DATA_DELAY)
-  ) s1_view ();
-
-  axi_fvip_txn_view_if #(
-    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(OUT_ID_W), .USER_W(USER_W),
-    .MAX_OUTSTANDING(MAX_OUTPUT_OUTSTANDING),
-    .MAX_AW_AHEAD(MAX_OUTPUT_AW_AHEAD),
-    .MAX_W_AHEAD(MAX_OUTPUT_W_AHEAD),
-    .MAX_BURST_LEN(MAX_BURST_LEN),
-    .MAX_RESPONSE_DELAY(MAX_RESPONSE_DELAY),
-    .MAX_WRITE_DATA_DELAY(MAX_OUTPUT_WRITE_DATA_DELAY)
-  ) m0_view ();
-  axi_fvip_txn_view_if #(
-    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(OUT_ID_W), .USER_W(USER_W),
-    .MAX_OUTSTANDING(MAX_OUTPUT_OUTSTANDING),
-    .MAX_AW_AHEAD(MAX_OUTPUT_AW_AHEAD),
-    .MAX_W_AHEAD(MAX_OUTPUT_W_AHEAD),
-    .MAX_BURST_LEN(MAX_BURST_LEN),
-    .MAX_RESPONSE_DELAY(MAX_RESPONSE_DELAY),
-    .MAX_WRITE_DATA_DELAY(MAX_OUTPUT_WRITE_DATA_DELAY)
-  ) m1_view ();
+  `XBAR_INPUT_VIEW(s0_view)
+  `XBAR_INPUT_VIEW(s1_view)
+  `XBAR_OUTPUT_VIEW(m0_view)
+  `XBAR_OUTPUT_VIEW(m1_view)
 
   // Cross-port proof helper, expressed only in public FVIP observer state.
   // Every forwarded output AW has already been accepted at one input, while
@@ -158,7 +184,7 @@ module fv_axi_xbar_fvip #(
       (m1_view.live_aw_valid && m1_view.live_aw_ready &&
        m1_view.live_b_valid && m1_view.live_b_ready));
 
-  localparam int IN_AW_W = IN_ID_W + ADDR_W + 35 + USER_W;
+  localparam int IN_AW_W = axi_pkg::aw_width(ADDR_W, IN_ID_W, USER_W);
   wire [ADDR_W-1:0] s0_aw_addr =
     s0_view.live_aw[IN_AW_W-IN_ID_W-1 -: ADDR_W];
   wire [ADDR_W-1:0] s1_aw_addr =
@@ -186,79 +212,10 @@ module fv_axi_xbar_fvip #(
        (s1_view.live_b_valid && s1_view.live_b_ready &&
         s1_b_resp == 2'b11)));
 
-  m_axi_fvip #(
-      .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(IN_ID_W), .USER_W(USER_W),
-      .MAX_STALL(MAX_STALL),
-      .ENABLE_MAX_STALL(1'b0),
-      .ENABLE_REQUEST_MAX_STALL(ENABLE_INPUT_MAX_STALL),
-      .ENABLE_RESPONSE_MAX_STALL(ENABLE_MAX_STALL),
-      .MAX_OUTSTANDING(MAX_OUTSTANDING),
-      .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD),
-      .ENABLE_EXCLUSIVE(1'b0), .ENABLE_ATOP(1'b0),
-      .MAX_BURST_LEN(MAX_BURST_LEN),
-      .ENABLE_TRANSACTION(ENABLE_TRANSACTION),
-      .ENABLE_RESPONSE_PROGRESS(ENABLE_RESPONSE_PROGRESS),
-      .MAX_RESPONSE_DELAY(MAX_INPUT_RESPONSE_DELAY),
-      .ENABLE_WRITE_DATA_PROGRESS(ENABLE_WRITE_DATA_PROGRESS),
-      .MAX_WRITE_DATA_DELAY(MAX_WRITE_DATA_DELAY)
-  ) i_s0_endpoint (
-    .clk(clk), .rstn(rstn), .axi(s_axi0), .view(s0_view)
-  );
-  m_axi_fvip #(
-    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(IN_ID_W), .USER_W(USER_W),
-    .MAX_STALL(MAX_STALL),
-    .ENABLE_MAX_STALL(1'b0),
-    .ENABLE_REQUEST_MAX_STALL(ENABLE_INPUT_MAX_STALL),
-    .ENABLE_RESPONSE_MAX_STALL(ENABLE_MAX_STALL),
-    .MAX_OUTSTANDING(MAX_OUTSTANDING),
-    .MAX_AW_AHEAD(MAX_AW_AHEAD), .MAX_W_AHEAD(MAX_W_AHEAD),
-    .ENABLE_EXCLUSIVE(1'b0), .ENABLE_ATOP(1'b0),
-    .MAX_BURST_LEN(MAX_BURST_LEN),
-    .ENABLE_TRANSACTION(ENABLE_TRANSACTION),
-    .ENABLE_RESPONSE_PROGRESS(ENABLE_RESPONSE_PROGRESS),
-    .MAX_RESPONSE_DELAY(MAX_INPUT_RESPONSE_DELAY),
-    .ENABLE_WRITE_DATA_PROGRESS(ENABLE_WRITE_DATA_PROGRESS),
-    .MAX_WRITE_DATA_DELAY(MAX_WRITE_DATA_DELAY)
-  ) i_s1_endpoint (
-    .clk(clk), .rstn(rstn), .axi(s_axi1), .view(s1_view)
-  );
-
-  s_axi_fvip #(
-      .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(OUT_ID_W), .USER_W(USER_W),
-      .MAX_STALL(MAX_STALL), .ENABLE_MAX_STALL(1'b0),
-      .ENABLE_REQUEST_MAX_STALL(ENABLE_MAX_STALL),
-      .ENABLE_RESPONSE_MAX_STALL(ENABLE_INPUT_MAX_STALL),
-      .MAX_OUTSTANDING(MAX_OUTPUT_OUTSTANDING),
-      .MAX_AW_AHEAD(MAX_OUTPUT_AW_AHEAD),
-      .MAX_W_AHEAD(MAX_OUTPUT_W_AHEAD),
-      .ENABLE_EXCLUSIVE(1'b0), .ENABLE_ATOP(1'b0),
-      .MAX_BURST_LEN(MAX_BURST_LEN),
-      .ENABLE_TRANSACTION(ENABLE_TRANSACTION),
-      .ENABLE_RESPONSE_PROGRESS(ENABLE_RESPONSE_PROGRESS),
-      .MAX_RESPONSE_DELAY(MAX_RESPONSE_DELAY),
-      .ENABLE_WRITE_DATA_PROGRESS(ENABLE_WRITE_DATA_PROGRESS),
-      .MAX_WRITE_DATA_DELAY(MAX_OUTPUT_WRITE_DATA_DELAY)
-  ) i_m0_endpoint (
-    .clk(clk), .rstn(rstn), .axi(m_axi0), .view(m0_view)
-  );
-  s_axi_fvip #(
-    .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(OUT_ID_W), .USER_W(USER_W),
-    .MAX_STALL(MAX_STALL), .ENABLE_MAX_STALL(1'b0),
-    .ENABLE_REQUEST_MAX_STALL(ENABLE_MAX_STALL),
-    .ENABLE_RESPONSE_MAX_STALL(ENABLE_INPUT_MAX_STALL),
-    .MAX_OUTSTANDING(MAX_OUTPUT_OUTSTANDING),
-    .MAX_AW_AHEAD(MAX_OUTPUT_AW_AHEAD),
-    .MAX_W_AHEAD(MAX_OUTPUT_W_AHEAD),
-    .ENABLE_EXCLUSIVE(1'b0), .ENABLE_ATOP(1'b0),
-    .MAX_BURST_LEN(MAX_BURST_LEN),
-    .ENABLE_TRANSACTION(ENABLE_TRANSACTION),
-    .ENABLE_RESPONSE_PROGRESS(ENABLE_RESPONSE_PROGRESS),
-    .MAX_RESPONSE_DELAY(MAX_RESPONSE_DELAY),
-    .ENABLE_WRITE_DATA_PROGRESS(ENABLE_WRITE_DATA_PROGRESS),
-    .MAX_WRITE_DATA_DELAY(MAX_OUTPUT_WRITE_DATA_DELAY)
-  ) i_m1_endpoint (
-    .clk(clk), .rstn(rstn), .axi(m_axi1), .view(m1_view)
-  );
+  `XBAR_INPUT_ENDPOINT(i_s0_endpoint, s_axi0, s0_view)
+  `XBAR_INPUT_ENDPOINT(i_s1_endpoint, s_axi1, s1_view)
+  `XBAR_OUTPUT_ENDPOINT(i_m0_endpoint, m_axi0, m0_view)
+  `XBAR_OUTPUT_ENDPOINT(i_m1_endpoint, m_axi1, m1_view)
 
   if (ENABLE_ROLE) begin : g_role
     fv_axi_xbar_role_fvip #(
@@ -283,3 +240,8 @@ module fv_axi_xbar_fvip #(
     );
   end
 endmodule
+
+`undef XBAR_INPUT_VIEW
+`undef XBAR_OUTPUT_VIEW
+`undef XBAR_INPUT_ENDPOINT
+`undef XBAR_OUTPUT_ENDPOINT

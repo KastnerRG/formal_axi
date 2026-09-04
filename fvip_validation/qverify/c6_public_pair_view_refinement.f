@@ -8,5 +8,6 @@ axi_sva/our/pkg_axi_fvip.sv
 axi_sva/our/axi_fvip_txn_view_if.sv
 axi_sva/our/axi_fvip_env_contract.sv
 axi_sva/our/axi_channel_fvip.sv
+axi_sva/our/stream_trackers.sv
 axi_sva/our/axi_fvip.sv
 fvip_validation/tb/tb_c6_public_pair_view_refinement.sv

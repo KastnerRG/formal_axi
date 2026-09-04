@@ -1,46 +1,7 @@
 package pkg_axi_fvip;
 
-  //___________ ENUMS (AXI4) ___________ 
-
-  // Table A3-3: Burst type encoding
-  typedef enum logic [1:0] {
-    BURST_FIXED = 2'b00,
-    BURST_INCR  = 2'b01,
-    BURST_WRAP  = 2'b10
-    // 2'b11 reserved
-  } burst_e;
-
-  // Table A3-4: Response encoding
-  typedef enum logic [1:0] {
-    RESP_OKAY   = 2'b00,
-    RESP_EXOKAY = 2'b01,
-    RESP_SLVERR = 2'b10,
-    RESP_DECERR = 2'b11
-  } resp_e;
-
-  // AXI4 uses 1-bit AxLOCK (A7.4)
-  typedef enum logic {
-    LOCK_NORMAL    = 1'b0,
-    LOCK_EXCLUSIVE = 1'b1
-  } lock_e;
-
-  // Table A4-5: Memory type encoding (unique values only)
-  // Note: different allocate hints share the same encoding;
-  // only one name per unique 4-bit value is listed here.
-  typedef enum logic [3:0] {
-    CACHE_DEV_NON_BUF     = 4'b0000,  // Device Non-bufferable
-    CACHE_DEV_BUF         = 4'b0001,  // Device Bufferable
-    CACHE_NORM_NON_CACHE  = 4'b0010,  // Normal Non-cacheable Non-bufferable
-    CACHE_NORM_BUF        = 4'b0011,  // Normal Non-cacheable Bufferable
-    CACHE_WT_NO_ALLOC     = 4'b0110,  // Write-through No-allocate (also Read-allocate)
-    CACHE_WB_NO_ALLOC     = 4'b0111,  // Write-back No-allocate (also Read-allocate)
-    CACHE_WT_WR_ALLOC     = 4'b1010,  // Write-through Write-allocate (also No-allocate on AR)
-    CACHE_WB_WR_ALLOC     = 4'b1011,  // Write-back Write-allocate (also No-allocate on AR)
-    CACHE_WT_RW_ALLOC     = 4'b1110,  // Write-through Read-and-Write-allocate
-    CACHE_WB_RW_ALLOC     = 4'b1111   // Write-back Read-and-Write-allocate
-  } cache_e;
-
-  //___________ FUNCTIONS ___________
+  // Local geometry helpers complement the canonical constants and width
+  // functions already provided by axi_pkg.
 
   let aligned_addr(addr, size) = (addr >> size) << size;
   let total_bytes(len, size)   = (len + 1) << size;
@@ -74,12 +35,12 @@ package pkg_axi_fvip;
     int lower_lane, upper_lane;
     logic [127:0] legal_lanes;
 
-    if (beat_idx == 0 || awburst == BURST_FIXED) begin
+    if (beat_idx == 0 || awburst == axi_pkg::BURST_FIXED) begin
       // A3.4.2: FIXED never updates addr or is_aligned
       beat_addr  = awaddr;
       is_aligned = (awaddr == start_aligned);
 
-    end else if (awburst == BURST_INCR) begin
+    end else if (awburst == axi_pkg::BURST_INCR) begin
       // A3.4.1: Address_N = Aligned_Address + (N-1) * Number_Bytes
       beat_addr  = start_aligned + longint'(beat_idx) * num_bytes;
       is_aligned = 1;

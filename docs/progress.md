@@ -1,6 +1,36 @@
 # AXI Formal VIP: C6 2x2 crossbar handoff
 
-## Latest update: C6 implementation complete, proof closure open
+## Latest update: maintainability refactor complete
+
+The post-C6 production closure is now **17 SystemVerilog files / 4731 physical
+lines**, down from the frozen **20 files / 5514 lines**. Two dead files outside
+that closure were also deleted, making the total change five fewer files and 1005
+fewer lines. The refactor intentionally removes the legacy wrapper APIs.
+
+The current structure has one shared endpoint implementation, a five-line
+polarity compilation shell, shared occurrence and ordered-pair cores with thin
+policy shells, and xbar role modules that consume four public endpoint views
+directly. The aggregate wrappers now contain configuration and instantiation
+rather than scalar proxy plumbing. The parameter-exact public view stays flat:
+Questa Formal 2023.2 mis-specialized packed member offsets when the 4-bit ingress
+and 5-bit egress ID variants coexisted.
+
+The refactored D1 xbar protocol run preserves the 286/298/186 checker inventory
+and byte-identical vacuity ledger while improving assertion closure from 207 to
+211; covers remain 166 reached and 277/285 applicable assertions are
+nonvacuous. The full aggregate plus focused reconciliation proves 219 unique
+assertions, four more than the frozen combined baseline, and reaches the same
+196 unique covers. All 216 proved assertions with applicable antecedents are
+nonvacuous; the other three are configuration checks. There are no failures or
+black boxes. This is proof preservation, not a reclassification of the frozen
+open production or bounded-progress ledgers. The FIFO aggregate plus focused
+runs resolve all 171 assertions and all 109 covers. The refinement and mutation
+gates are also clean, including the final 40-case transaction sweep: 11
+legal/isolation cases quiet, 29 negative cases detected as intended, and no
+unexpected or inconclusive result. Exact artifacts and accounting are in
+[`c6_execution.md`](c6_execution.md).
+
+## Previous update: C6 implementation complete, proof closure open
 
 The 2x2 crossbar now follows the same aggregate structure as the FIFO: four
 standalone endpoint FVIPs prove role-independent protocol and transaction
@@ -333,17 +363,20 @@ Property naming/classification:
 
 ### Compile-time polarity
 
-`axi_sva/our/axi_switch_fvip.svh` compiles the shared source twice:
+`axi_sva/axi_fvip_endpoints.sv` compiles the shared source twice; the polarity
+mapping is kept next to the implementation in `axi_sva/our/axi_fvip.sv`:
 
-- `m_axi_fvip` checks an AXI Manager agent. Manager request-channel rules are
+- `manager_axi_fvip` checks an AXI Manager agent. Manager request-channel rules are
   assumptions and subordinate response-channel rules are assertions.
-- `s_axi_fvip` checks an AXI Subordinate agent. DUT request outputs are
+- `subordinate_axi_fvip` checks an AXI Subordinate agent. DUT request outputs are
   assertions and external response inputs are assumptions.
 - `TXN_SOURCE` and `TXN_DEST` apply the same polarity to cross-channel rules.
 
-`axi_sva/m_sva_wrap.sv` and `axi_sva/s_sva_wrap.sv` pass `AXI_BUS.Monitor`
-directly to the endpoint checker. Disabled third-party ARM, Yosys, and ZipCPU
-checker wrappers remain commented out; the active implementation is `u_our`.
+`axi_sva/axi_fvip_endpoints.sv` is only a compilation unit: `qverify` uses it
+to compile `manager_axi_fvip` and `subordinate_axi_fvip` from the shared endpoint source. The
+legacy wrapper modules and disabled third-party wrapper blocks are gone. Role
+aggregates instantiate the endpoint modules directly, and the DMA harness
+directly instantiates `subordinate_axi_fvip`.
 
 For a pass-through FIFO:
 
@@ -852,7 +885,7 @@ the intended contract clearly:
 - Two 64 KiB windows:
   - output 0: `[0x0000_0000, 0x0001_0000)`
   - output 1: `[0x0001_0000, 0x0002_0000)`
-- Default master port is disabled, so unmapped-address behavior must be
+- Default manager port is disabled, so unmapped-address behavior must be
   specified/tested rather than guessed.
 - PULP widens the output ID from `MST_ID_W` to
   `MST_ID_W+$clog2(NUM_MST)` and uses the ingress port as part of response

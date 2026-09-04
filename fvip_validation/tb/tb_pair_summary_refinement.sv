@@ -8,7 +8,7 @@
 // prove only an observer-state transformation and cannot depend on a crossbar
 // implementation or on another protocol assertion.
 
-`define MODNAME_PAIR_TRACKER s_axi_pair_tracker_summary_refinement
+`define MODNAME_PAIR_TRACKER subordinate_axi_pair_tracker_summary_refinement
 `define TXN_SOURCE assert
 `include "axi_pair_tracker.sv"
 `undef TXN_SOURCE
@@ -87,9 +87,9 @@ module tb_pair_summary_refinement (
   a_aw_burst_legal: assume property (
     aw_valid |-> aw_burst != 2'b11);
   a_aw_fixed_len_legal: assume property (
-    aw_valid && aw_burst == pkg_axi_fvip::BURST_FIXED |-> aw_len <= 8'd15);
+    aw_valid && aw_burst == axi_pkg::BURST_FIXED |-> aw_len <= 8'd15);
   a_aw_wrap_len_legal: assume property (
-    aw_valid && aw_burst == pkg_axi_fvip::BURST_WRAP |->
+    aw_valid && aw_burst == axi_pkg::BURST_WRAP |->
       aw_len inside {8'd1, 8'd3, 8'd7, 8'd15});
 
   // Match the endpoint-owned channel counter exactly.  AWLEN remains a free
@@ -103,7 +103,7 @@ module tb_pair_summary_refinement (
       current_w_beat <= current_w_beat + 1'b1;
   end
 
-  s_axi_pair_tracker_summary_refinement #(
+  subordinate_axi_pair_tracker_summary_refinement #(
     .ADDR_W(ADDR_W),
     .DATA_W(DATA_W),
     .MAX_A_AHEAD(MAX_A_AHEAD),
@@ -223,6 +223,6 @@ module tb_pair_summary_refinement (
   c_refine_lane_zero: cover property (rstn && aw_valid && !lane_probe);
   c_refine_lane_one: cover property (rstn && aw_valid && lane_probe);
   c_refine_awlen_255: cover property (
-    rstn && aw_valid && aw_burst == pkg_axi_fvip::BURST_INCR &&
+    rstn && aw_valid && aw_burst == axi_pkg::BURST_INCR &&
     aw_len == 8'hff);
 endmodule

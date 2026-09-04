@@ -12,9 +12,10 @@ the endpoint FVIP independently handles AXI protocol legality.
   role checker.
 - [`axi_fifo_role_fvip.sv`](axi_fifo_role_fvip.sv) connects one conservation
   tracker to each of AW, W, B, AR, and R. It depends only on the public views.
-- [`fifo_tracker.sv`](fifo_tracker.sv) proves no phantom output, no overflow,
-  no duplication/drop/reordering, payload integrity, and optional bounded
-  progress for one ready/valid stream.
+- [`stream_trackers.sv`](../../axi_sva/our/stream_trackers.sv) defines
+  `fv_fifo_tracker`, which proves no phantom output, no overflow, no
+  duplication/drop/reordering, payload integrity, and optional bounded progress
+  for one ready/valid stream.
 
 ## Tracking
 
